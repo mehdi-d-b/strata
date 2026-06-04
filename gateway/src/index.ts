@@ -1,10 +1,16 @@
 /**
  * Gateway temps réel Strata.
  *
- *  - WS  /ws            : pousse en direct chaque mesure du topic Redpanda `tags.raw`.
- *  - GET /api/history   : renvoie l'historique d'un tag depuis TimescaleDB.
- *  - GET /api/tags      : liste les tags connus.
- *  - GET /health        : sonde de vie.
+ *  - WS  /ws              : pousse en direct chaque mesure de `tags.raw` (scaling appliqué).
+ *  - GET  /api/history    : historique d'un tag depuis TimescaleDB (scaling appliqué).
+ *  - GET  /api/tags       : liste des tags configurés (métadonnées).
+ *  - POST /api/tags       : crée/met à jour un tag (upsert).
+ *  - DELETE /api/tags/:name : supprime la config d'un tag.
+ *  - GET  /health         : sonde de vie.
+ *
+ * Principe : la valeur stockée dans `mesures` est TOUJOURS brute. Le scaling
+ * (value * scale + offset) est appliqué À LA LECTURE, ici, à partir de la
+ * table `tags`. Corriger une échelle répare donc tout l'historique d'un coup.
  */
 import Fastify from "fastify";
 import websocket from "@fastify/websocket";
@@ -13,12 +19,59 @@ import pg from "pg";
 
 const KAFKA_BROKERS = (process.env.KAFKA_BROKERS ?? "redpanda:9092").split(",");
 const PG_DSN =
-  process.env.PG_DSN ??
-  "postgres://strata:strata@timescaledb:5432/strata";
+  process.env.PG_DSN ?? "postgres://strata:strata@timescaledb:5432/strata";
 const PORT = Number(process.env.PORT ?? 3001);
 
-// --- Postgres (historique) -------------------------------------------------
+// --- Postgres --------------------------------------------------------------
 const pool = new pg.Pool({ connectionString: PG_DSN });
+
+type TagConfig = {
+  name: string;
+  label: string | null;
+  unit: string | null;
+  scale: number;
+  offset: number;
+  enabled: boolean;
+  description: string | null;
+};
+
+// Cache en mémoire de la config des tags, pour appliquer le scaling au fil de
+// l'eau (temps réel) sans requête SQL par message. Rafraîchi périodiquement et
+// après chaque écriture.
+const tagCache = new Map<string, TagConfig>();
+
+async function refreshTagCache() {
+  const { rows } = await pool.query(
+    `SELECT name, label, unit, scale, offset_val AS offset, enabled, description
+     FROM tags`,
+  );
+  tagCache.clear();
+  for (const r of rows) {
+    tagCache.set(r.name, {
+      ...r,
+      scale: Number(r.scale),
+      offset: Number(r.offset),
+    });
+  }
+}
+
+/** Applique scale/offset si le tag est configuré, sinon renvoie la valeur brute. */
+function scaled(name: string, raw: number): number {
+  const cfg = tagCache.get(name);
+  if (!cfg) return raw;
+  return raw * cfg.scale + cfg.offset;
+}
+
+/** Crée une ligne `tags` par défaut pour un tag jamais vu (auto-découverte). */
+async function ensureTagExists(name: string) {
+  if (tagCache.has(name)) return;
+  await pool.query(
+    `INSERT INTO tags (name, label) VALUES ($1, $1)
+     ON CONFLICT (name) DO NOTHING`,
+    [name],
+  );
+  await refreshTagCache();
+}
 
 // --- Fastify ---------------------------------------------------------------
 const app = Fastify({ logger: true });
@@ -29,23 +82,58 @@ const clients = new Set<import("ws").WebSocket>();
 
 app.get("/health", async () => ({ status: "ok" }));
 
+// Liste des tags configurés (avec métadonnées).
 app.get("/api/tags", async () => {
   const { rows } = await pool.query(
-    "SELECT DISTINCT tag FROM mesures ORDER BY tag",
+    `SELECT name, label, unit, scale, offset_val AS offset, enabled, description
+     FROM tags ORDER BY name`,
   );
-  return rows.map((r) => r.tag);
+  return rows;
 });
 
-app.get("/api/history", async (req) => {
+// Upsert d'un tag.
+app.post("/api/tags", async (req, reply) => {
+  const b = req.body as Partial<TagConfig> & { name?: string };
+  if (!b.name) return reply.code(400).send({ error: "champ 'name' requis" });
+  await pool.query(
+    `INSERT INTO tags (name, label, unit, scale, offset_val, enabled, description, updated_at)
+     VALUES ($1, $2, $3, COALESCE($4,1), COALESCE($5,0), COALESCE($6,true), $7, now())
+     ON CONFLICT (name) DO UPDATE SET
+       label = EXCLUDED.label,
+       unit = EXCLUDED.unit,
+       scale = EXCLUDED.scale,
+       offset_val = EXCLUDED.offset_val,
+       enabled = EXCLUDED.enabled,
+       description = EXCLUDED.description,
+       updated_at = now()`,
+    [b.name, b.label ?? null, b.unit ?? null, b.scale, b.offset, b.enabled, b.description ?? null],
+  );
+  await refreshTagCache();
+  return tagCache.get(b.name);
+});
+
+// Suppression de la config d'un tag (l'historique dans `mesures` est conservé).
+app.delete("/api/tags/:name", async (req) => {
+  const { name } = req.params as { name: string };
+  await pool.query("DELETE FROM tags WHERE name = $1", [name]);
+  await refreshTagCache();
+  return { deleted: name };
+});
+
+// Historique d'un tag, scaling appliqué côté SQL.
+app.get("/api/history", async (req, reply) => {
   const q = req.query as { tag?: string; minutes?: string };
   const tag = q.tag;
   const minutes = Number(q.minutes ?? 15);
-  if (!tag) return { error: "param 'tag' requis" };
+  if (!tag) return reply.code(400).send({ error: "param 'tag' requis" });
+  const cfg = tagCache.get(tag);
+  const scale = cfg?.scale ?? 1;
+  const offset = cfg?.offset ?? 0;
   const { rows } = await pool.query(
-    `SELECT ts, value FROM mesures
-     WHERE tag = $1 AND ts > now() - ($2 || ' minutes')::interval
+    `SELECT ts, value * $2 + $3 AS value FROM mesures
+     WHERE tag = $1 AND ts > now() - ($4 || ' minutes')::interval
      ORDER BY ts ASC`,
-    [tag, minutes],
+    [tag, scale, offset, minutes],
   );
   return rows;
 });
@@ -57,7 +145,7 @@ app.register(async (f) => {
   });
 });
 
-// --- Consumer Redpanda : fan-out vers les WS -------------------------------
+// --- Consumer Redpanda : fan-out vers les WS (scaling appliqué) ------------
 const kafka = new Kafka({
   clientId: "strata-gateway",
   brokers: KAFKA_BROKERS,
@@ -67,8 +155,8 @@ const kafka = new Kafka({
 async function startConsumer() {
   const consumer = kafka.consumer({ groupId: "strata-gateway-ws" });
 
-  // Si le consumer crashe (ex: message dans un format non géré), KafkaJS émet
-  // CRASH puis s'arrête. On le relance pour ne pas rester muet en silence.
+  // Si le consumer crashe (format non géré, coupure…), KafkaJS émet CRASH puis
+  // s'arrête. On le relance pour ne pas rester muet en silence.
   consumer.on(consumer.events.CRASH, (e) => {
     app.log.error(`consumer crash: ${e.payload.error.message} — relance dans 3s`);
     setTimeout(() => startConsumer().catch(() => {}), 3000);
@@ -80,16 +168,28 @@ async function startConsumer() {
     eachMessage: async ({ message }) => {
       const payload = message.value?.toString();
       if (!payload) return;
+      let m: { tag: string; value: number; ts: string; quality?: string; source?: string };
+      try {
+        m = JSON.parse(payload);
+      } catch {
+        return;
+      }
+      // Auto-découverte : un nouveau tag apparaît -> on crée sa config par défaut.
+      if (!tagCache.has(m.tag)) await ensureTagExists(m.tag);
+      // On pousse la valeur SCALÉE au navigateur (cohérent avec l'historique).
+      const out = JSON.stringify({ ...m, value: scaled(m.tag, m.value) });
       for (const ws of clients) {
-        if (ws.readyState === 1) ws.send(payload); // 1 = OPEN
+        if (ws.readyState === 1) ws.send(out); // 1 = OPEN
       }
     },
   });
   app.log.info("consumer Redpanda démarré sur tags.raw");
 }
 
-// --- Démarrage avec retry (le broker peut ne pas être prêt) ----------------
+// --- Démarrage -------------------------------------------------------------
 async function main() {
+  await refreshTagCache();
+  setInterval(() => refreshTagCache().catch(() => {}), 10_000); // garde le cache frais
   await app.listen({ host: "0.0.0.0", port: PORT });
   for (;;) {
     try {
