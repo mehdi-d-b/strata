@@ -12,13 +12,13 @@ couches. Chaque phase est démontrable seule.
 - [x] Init SQL Timescale : extension + hypertable `mesures`
 - [x] `CLAUDE.md`, `README`, ADR de décisions
 
-## Phase 1 — Chaîne complète minimale (« hello world industriel »)
+## Phase 1 — Chaîne complète minimale (« hello world industriel ») ⬅️ *en cours*
 **But : voir une valeur partir du simulateur → courbe temps réel + requête d'historique.**
-- [ ] Simulateur v0 : publie 2-3 tags en **MQTT**
-- [ ] Redpanda Connect #1 : MQTT in → normalisation → topic `tags.raw`
-- [ ] Redpanda Connect #2 : `tags.raw` → sink TimescaleDB (`mesures`)
-- [ ] Gateway WS/SSE : consomme `tags.raw` → navigateur
-- [ ] Web : 1 courbe temps réel (uPlot) + 1 courbe historique (requête Timescale)
+- [x] Simulateur v0 : publie 3 tags en **MQTT** (compteur, température, vitesse)
+- [x] Redpanda Connect #1 : MQTT in → normalisation → topic `tags.raw`
+- [x] Redpanda Connect #2 : `tags.raw` → sink TimescaleDB (`mesures`)
+- [x] Gateway WS : consomme `tags.raw` → navigateur (+ historique REST `/api/history`)
+- [x] Web : courbe temps réel (uPlot) amorcée par l'historique Timescale
 
 ## Phase 2 — Configuration & modèle de tags
 **But : plus rien de hardcodé ; on paramètre depuis l'UI.**

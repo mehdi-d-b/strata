@@ -132,6 +132,23 @@ services:
       - ./connectors/raw-to-timescale.yaml:/connect.yaml:ro
     restart: unless-stopped
 
+  # Gateway temps réel : Redpanda tags.raw -> WebSocket, + historique REST.
+  gateway:
+    build: ./gateway
+    container_name: strata-gateway
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      PG_DSN: "postgres://${TIMESCALE_USER:-strata}:${TIMESCALE_PASSWORD:-strata}@timescaledb:5432/${TIMESCALE_DB:-strata}"
+      PORT: "3001"
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+
 volumes:
   redpanda-data:
   timescale-data:

@@ -26,3 +26,6 @@ output:
     seed_brokers: ["redpanda:9092"]
     topic: "tags.raw"
     key: '${! json("tag") }'
+    # KafkaJS (gateway) ne décode pas Snappy ; on désactive la compression.
+    # À notre débit, le gain serait négligeable de toute façon.
+    compression: none

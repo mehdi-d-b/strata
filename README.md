@@ -32,6 +32,24 @@ make down      # arrête le stack
 make clean     # reset complet (supprime les volumes)
 ```
 
+Le stack inclut simulateur, broker MQTT, connecteurs et **gateway temps réel**
+(http://localhost:3001). Vérifier que les mesures arrivent :
+
+```bash
+docker compose exec timescaledb psql -U strata -d strata \
+  -c "SELECT ts, tag, value FROM mesures ORDER BY ts DESC LIMIT 5;"
+```
+
+## Interface web (dev)
+
+Le frontend tourne en dev avec hot-reload (hors Docker) :
+
+```bash
+cd web
+npm install
+npm run dev        # http://localhost:5173 (proxifie /api et /ws vers la gateway)
+```
+
 ## Roadmap
 
-Voir [docs/roadmap.md](docs/roadmap.md). On est en **Phase 0** (socle).
+Voir [docs/roadmap.md](docs/roadmap.md). **Phase 1** (chaîne complète) en cours de validation.
