@@ -1,0 +1,28 @@
+# Redpanda Connect — pipeline #1 : MQTT → topic Redpanda `tags.raw`.
+#
+# Rôle : recevoir les messages bruts du simulateur (et demain de vraies sources
+# MQTT/OPC-UA-bridge) et les NORMALISER au contrat de données Strata.
+# Le nom de tag est dérivé du topic MQTT : factory/ligne1/compteur -> ligne1.compteur
+
+input:
+  mqtt:
+    urls: ["tcp://mosquitto:1883"]
+    topics: ["factory/#"]
+    client_id: "strata-connect-mqtt-in"
+
+pipeline:
+  processors:
+    - mapping: |
+        # topic MQTT, ex: "factory/ligne1/compteur"
+        let parts = meta("mqtt_topic").split("/")
+        root.tag = $parts.slice(1).join(".")
+        root.value = this.value
+        root.ts = now()
+        root.quality = this.quality.or("good")
+        root.source = "sim-mqtt"
+
+output:
+  kafka_franz:
+    seed_brokers: ["redpanda:9092"]
+    topic: "tags.raw"
+    key: '${! json("tag") }'

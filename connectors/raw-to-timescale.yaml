@@ -1,0 +1,23 @@
+# Redpanda Connect — pipeline #2 : topic `tags.raw` → sink TimescaleDB.
+#
+# Rôle : historiser chaque mesure normalisée dans l'hypertable `mesures`.
+# C'est le seul endroit qui connaît le schéma SQL ; le reste du système ne voit
+# que le topic `tags.raw`.
+
+input:
+  kafka_franz:
+    seed_brokers: ["redpanda:9092"]
+    topics: ["tags.raw"]
+    consumer_group: "strata-timescale-sink"
+
+output:
+  sql_insert:
+    driver: postgres
+    dsn: "postgres://${TIMESCALE_USER:strata}:${TIMESCALE_PASSWORD:strata}@timescaledb:5432/${TIMESCALE_DB:strata}?sslmode=disable"
+    table: mesures
+    columns: [ts, tag, value, quality, source]
+    args_mapping: |
+      root = [ this.ts, this.tag, this.value, this.quality, this.source ]
+    batching:
+      count: 50
+      period: 1s

@@ -1,0 +1,137 @@
+# Strata — socle Phase 0 : Redpanda + Redpanda Console + TimescaleDB.
+# Versions épinglées ; ajuste les tags si un pull échoue (voir hub.docker.com).
+
+name: strata
+
+services:
+  redpanda:
+    image: redpandadata/redpanda:v24.3.1
+    container_name: strata-redpanda
+    command:
+      - redpanda
+      - start
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://redpanda:9092,external://localhost:19092
+      - --pandaproxy-addr=internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr=internal://redpanda:8082,external://localhost:18082
+      - --schema-registry-addr=internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr=redpanda:33145
+      - --advertise-rpc-addr=redpanda:33145
+      - --mode=dev-container
+      - --smp=1
+      - --default-log-level=info
+    ports:
+      - "18081:18081"   # schema registry
+      - "18082:18082"   # pandaproxy (REST)
+      - "19092:19092"   # kafka API (externe)
+      - "9644:9644"     # admin API
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true'"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  console:
+    image: redpandadata/console:v2.8.1
+    container_name: strata-console
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      KAFKA_SCHEMAREGISTRY_ENABLED: "true"
+      KAFKA_SCHEMAREGISTRY_URLS: http://redpanda:8081
+      REDPANDA_ADMINAPI_ENABLED: "true"
+      REDPANDA_ADMINAPI_URLS: http://redpanda:9644
+
+  timescaledb:
+    image: timescale/timescaledb:2.17.2-pg16
+    container_name: strata-timescaledb
+    environment:
+      POSTGRES_USER: ${TIMESCALE_USER:-strata}
+      POSTGRES_PASSWORD: ${TIMESCALE_PASSWORD:-strata}
+      POSTGRES_DB: ${TIMESCALE_DB:-strata}
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescale-data:/var/lib/postgresql/data
+      - ./infra/timescale/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TIMESCALE_USER:-strata} -d ${TIMESCALE_DB:-strata}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # --- Phase 1 : chaîne de données ---------------------------------------
+
+  # Crée le topic normalisé une fois Redpanda prêt, puis se termine.
+  topic-init:
+    image: redpandadata/redpanda:v24.3.1
+    container_name: strata-topic-init
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - rpk topic create tags.raw --brokers redpanda:9092 -p 1 -r 1 || true
+    restart: "no"
+
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: strata-mosquitto
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+  simulator:
+    build: ./simulator
+    container_name: strata-simulator
+    depends_on:
+      - mosquitto
+    environment:
+      MQTT_URL: tcp://mosquitto:1883
+      INTERVAL_MS: "1000"
+    restart: unless-stopped
+
+  # Redpanda Connect #1 : MQTT -> normalisation -> topic tags.raw
+  connect-mqtt-to-raw:
+    image: docker.redpanda.com/redpandadata/connect:latest
+    container_name: strata-connect-mqtt
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    command: ["run", "/connect.yaml"]
+    volumes:
+      - ./connectors/mqtt-to-raw.yaml:/connect.yaml:ro
+    restart: unless-stopped
+
+  # Redpanda Connect #2 : topic tags.raw -> sink TimescaleDB
+  connect-raw-to-timescale:
+    image: docker.redpanda.com/redpandadata/connect:latest
+    container_name: strata-connect-timescale
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    command: ["run", "/connect.yaml"]
+    environment:
+      TIMESCALE_USER: ${TIMESCALE_USER:-strata}
+      TIMESCALE_PASSWORD: ${TIMESCALE_PASSWORD:-strata}
+      TIMESCALE_DB: ${TIMESCALE_DB:-strata}
+    volumes:
+      - ./connectors/raw-to-timescale.yaml:/connect.yaml:ro
+    restart: unless-stopped
+
+volumes:
+  redpanda-data:
+  timescale-data:
