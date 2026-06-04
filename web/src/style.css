@@ -180,3 +180,39 @@ table.tags button.ghost {
 .hint code {
   color: #c9d1d9;
 }
+
+.card-title {
+  margin: 0 0 14px;
+  font-size: 15px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.card-title button.add {
+  background: #103a24;
+  color: #3fb950;
+  border: 1px solid #1f6f3f;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+table.tags select {
+  background: #0e1116;
+  color: #e6edf3;
+  border: 1px solid #2d3645;
+  border-radius: 5px;
+  padding: 5px 8px;
+}
+
+table.tags input[type="date"],
+table.tags input[type="time"] {
+  background: #0e1116;
+  color: #e6edf3;
+  border: 1px solid #2d3645;
+  border-radius: 5px;
+  padding: 4px 6px;
+}

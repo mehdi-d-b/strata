@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { LiveView } from "./LiveView";
 import { TagsView } from "./TagsView";
+import { ProductionView } from "./ProductionView";
 
-type Tab = "live" | "tags";
+type Tab = "live" | "production" | "tags";
 
 export function App() {
   const [tab, setTab] = useState<Tab>("live");
@@ -22,6 +23,12 @@ export function App() {
             Temps réel
           </button>
           <button
+            className={tab === "production" ? "active" : ""}
+            onClick={() => setTab("production")}
+          >
+            Production
+          </button>
+          <button
             className={tab === "tags" ? "active" : ""}
             onClick={() => setTab("tags")}
           >
@@ -29,7 +36,11 @@ export function App() {
           </button>
         </nav>
       </header>
-      <main>{tab === "live" ? <LiveView /> : <TagsView />}</main>
+      <main>
+        {tab === "live" && <LiveView />}
+        {tab === "production" && <ProductionView />}
+        {tab === "tags" && <TagsView />}
+      </main>
     </>
   );
 }

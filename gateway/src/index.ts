@@ -138,6 +138,87 @@ app.get("/api/history", async (req, reply) => {
   return rows;
 });
 
+// ─── Production / shifts / rôles (Phase 3) ────────────────────────────────
+
+// Production par shift et par rôle. Optionnel ?days=N pour limiter l'historique.
+app.get("/api/production", async (req) => {
+  const q = req.query as { days?: string };
+  const days = Number(q.days ?? 7);
+  const { rows } = await pool.query(
+    `SELECT day, shift_no, shift_label, ok, scrap, produced, available
+     FROM prod_by_shift_role
+     WHERE day > (now() - ($1 || ' days')::interval)::date
+     ORDER BY day DESC, shift_no ASC`,
+    [days],
+  );
+  return rows;
+});
+
+// Planning de shifts (toutes versions).
+app.get("/api/shifts", async () => {
+  const { rows } = await pool.query(
+    `SELECT valid_from, shift_no, label, start_time, end_time
+     FROM shift_schedule ORDER BY valid_from DESC, shift_no ASC`,
+  );
+  return rows;
+});
+
+// Upsert d'une ligne de planning.
+app.post("/api/shifts", async (req, reply) => {
+  const b = req.body as {
+    valid_from?: string;
+    shift_no?: number;
+    label?: string;
+    start_time?: string;
+    end_time?: string;
+  };
+  if (!b.valid_from || b.shift_no == null || !b.start_time || !b.end_time)
+    return reply.code(400).send({ error: "valid_from, shift_no, start_time, end_time requis" });
+  await pool.query(
+    `INSERT INTO shift_schedule (valid_from, shift_no, label, start_time, end_time)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (valid_from, shift_no) DO UPDATE SET
+       label = EXCLUDED.label,
+       start_time = EXCLUDED.start_time,
+       end_time = EXCLUDED.end_time`,
+    [b.valid_from, b.shift_no, b.label ?? null, b.start_time, b.end_time],
+  );
+  return { ok: true };
+});
+
+// Suppression d'une ligne de planning.
+app.delete("/api/shifts/:validFrom/:shiftNo", async (req) => {
+  const { validFrom, shiftNo } = req.params as { validFrom: string; shiftNo: string };
+  await pool.query(
+    "DELETE FROM shift_schedule WHERE valid_from = $1 AND shift_no = $2",
+    [validFrom, Number(shiftNo)],
+  );
+  return { ok: true };
+});
+
+// Rôles des tags (mapping tag -> produced/ok/scrap/available).
+app.get("/api/tag-roles", async () => {
+  const { rows } = await pool.query(
+    "SELECT tag_name, role FROM tag_role ORDER BY tag_name",
+  );
+  return rows;
+});
+
+// Définit/retire le rôle d'un tag. role=null pour retirer.
+app.post("/api/tag-roles", async (req, reply) => {
+  const b = req.body as { tag_name?: string; role?: string | null };
+  if (!b.tag_name) return reply.code(400).send({ error: "tag_name requis" });
+  // Un tag a au plus un rôle ici : on nettoie puis on (ré)insère.
+  await pool.query("DELETE FROM tag_role WHERE tag_name = $1", [b.tag_name]);
+  if (b.role) {
+    await pool.query("INSERT INTO tag_role (tag_name, role) VALUES ($1, $2)", [
+      b.tag_name,
+      b.role,
+    ]);
+  }
+  return { ok: true };
+});
+
 app.register(async (f) => {
   f.get("/ws", { websocket: true }, (socket) => {
     clients.add(socket);

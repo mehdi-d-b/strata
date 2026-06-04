@@ -19,16 +19,26 @@ type Tag = {
 };
 
 // État interne du simulateur.
-let compteur = 0;
+// Compteurs cumulatifs (comme de vrais compteurs PLC, monotones croissants).
+let cptOk = 0; // pièces bonnes
+let cptScrap = 0; // pièces au rebut
 const t0 = Date.now();
 
 const tags: Tag[] = [
   {
-    // Compteur de production : monotone croissant, ~1 pièce/s en moyenne.
-    topic: "factory/ligne1/compteur",
+    // Compteur pièces OK : ~1 pièce/s, avec irrégularité.
+    topic: "factory/ligne1/pieces_ok",
     next: () => {
-      if (Math.random() < 0.8) compteur += 1; // un peu d'irrégularité
-      return compteur;
+      if (Math.random() < 0.8) cptOk += 1;
+      return cptOk;
+    },
+  },
+  {
+    // Compteur rebut : monte beaucoup plus lentement (~5 % du flux).
+    topic: "factory/ligne1/pieces_rebut",
+    next: () => {
+      if (Math.random() < 0.05) cptScrap += 1;
+      return cptScrap;
     },
   },
   {
