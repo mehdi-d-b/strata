@@ -12,7 +12,7 @@ couches. Chaque phase est démontrable seule.
 - [x] Init SQL Timescale : extension + hypertable `mesures`
 - [x] `CLAUDE.md`, `README`, ADR de décisions
 
-## Phase 1 — Chaîne complète minimale (« hello world industriel ») ⬅️ *en cours*
+## Phase 1 — Chaîne complète minimale (« hello world industriel »)
 **But : voir une valeur partir du simulateur → courbe temps réel + requête d'historique.**
 - [x] Simulateur v0 : publie 3 tags en **MQTT** (compteur, température, vitesse)
 - [x] Redpanda Connect #1 : MQTT in → normalisation → topic `tags.raw`
@@ -20,12 +20,15 @@ couches. Chaque phase est démontrable seule.
 - [x] Gateway WS : consomme `tags.raw` → navigateur (+ historique REST `/api/history`)
 - [x] Web : courbe temps réel (uPlot) amorcée par l'historique Timescale
 
-## Phase 2 — Configuration & modèle de tags
+## Phase 2 — Configuration & modèle de tags ⬅️ *fait*
 **But : plus rien de hardcodé ; on paramètre depuis l'UI.**
-- [ ] Modèle `tags` en base (nom, adresse, type, unité, scaling, scan rate, source)
-- [ ] UI web : CRUD tags + paramètres globaux
-- [ ] Connecteurs pilotés par la config (dynamiques)
-- [ ] Conversion d'unités / mise à l'échelle dans Redpanda Connect
+- [x] Modèle `tags` en base (nom, label, unité, scale, offset, enabled, description)
+- [x] Auto-découverte : tout tag entrant crée sa config par défaut
+- [x] UI web : tableau éditable des tags (onglet « Tags »)
+- [x] Scaling appliqué **à la lecture** (gateway) : brut intact en base, `× scale + offset`
+      à l'affichage — historique ET temps réel cohérents
+- [x] Bonus UX : libellés + unités dans le graphe, sélecteur de plage (5/15/60 min)
+- [ ] *Reporté* : scan rate / source par tag, paramètres globaux (pas nécessaires à ce stade)
 
 ## Phase 3 — Agrégats & dashboards métier
 **But : dashboard production/shift en ETL « transparent ».**
