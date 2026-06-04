@@ -40,12 +40,17 @@ couches. Chaque phase est démontrable seule.
 - [x] Onglet web « Production » : tableau par shift (OK/rebut/taux), édition planning + rôles
 - [ ] *Reporté* : OEE complet, multi-lignes, courbes historiques avec zoom
 
-## Phase 4 — Le vrai industriel
+## Phase 4 — Le vrai industriel ⬅️ *PLC4X fait*
 **But : sortir du simulateur, brancher de vrais protocoles.**
+- [x] PLC4X via Kafka Connect (S7 / Modbus / EtherNet-IP) — profil Docker optionnel `plc4x`
+      (1 container JVM isolé). Testable sans matériel via le driver `simulated://`.
+- [x] Normaliseur `plc.raw → tags.raw` (Redpanda Connect) : éclate les tags PLC4X groupés
+- [x] **Convention de nommage métier** `site.ligne.machine.mesure` coulée dans le béton
+      (indépendante du protocole ; `source` en métadonnée). MQTT + PLC4X alignés.
+- [x] 3 templates connecteurs commentés (Siemens/Schneider/Rockwell), prêts pour le réel
 - [ ] OPC-UA : bridge source (`gopcua`) → `tags.raw` (+ serveur OPC-UA dans le simulateur)
-- [ ] PLC4X via Kafka Connect (Modbus / S7 / Allen-Bradley) — profil Docker optionnel (1 container JVM)
 - [ ] libplctag : option no-JVM pour Allen-Bradley en direct
-- [ ] Sink PLC4X : écriture de consignes dans les tags
+- [ ] Sink PLC4X : écriture de consignes dans les tags (le `Plc4xSinkConnector` est déjà dispo)
 
 ## Phase 5 — Plus si affinité
 - [ ] RisingWave : streams dérivés temps réel, alarmes

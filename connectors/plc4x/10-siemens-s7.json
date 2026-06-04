@@ -1,0 +1,25 @@
+{
+  "_README": "Connecteur PLC4X pour Siemens S7 (S7-1200/1500, S7-300/400). Par défaut en simulated:// (testable sans matériel). Pour brancher un vrai automate : remplacer connectionString par s7://<IP>, et les adresses RANDOM/... par de vraies adresses S7. Déployer : curl -X POST localhost:8083/connectors -H 'content-type: application/json' -d @connectors/plc4x/10-siemens-s7.json",
+
+  "name": "plc4x-siemens",
+  "config": {
+    "connector.class": "org.apache.plc4x.kafka.Plc4xSourceConnector",
+    "tasks.max": "1",
+    "default.topic": "plc.raw",
+
+    "_comment_source": "RÉEL : 's7://192.168.0.10'  (option : ?remote-rack=0&remote-slot=1 selon CPU)",
+    "sources": "s7line",
+    "sources.s7line.connectionString": "simulated://127.0.0.1",
+    "sources.s7line.pollReturnInterval": "1000",
+    "sources.s7line.bufferSize": "100",
+
+    "_comment_addresses": "RÉEL S7 : %DB1.DBD0:DINT (double mot DB1 offset 0), %DB1.DBW4:INT, %M0.0:BOOL (mémento), %I0.0:BOOL (entrée), %Q0.0:BOOL (sortie). Ici RANDOM/... = valeurs simulées.",
+    "sources.s7line.jobReferences": "scan",
+    "jobs": "scan",
+    "jobs.scan.interval": "1000",
+    "jobs.scan.tags": "temperature,pression,compteur",
+    "jobs.scan.tags.temperature": "RANDOM/temp:DINT",
+    "jobs.scan.tags.pression": "RANDOM/press:DINT",
+    "jobs.scan.tags.compteur": "RANDOM/count:DINT"
+  }
+}

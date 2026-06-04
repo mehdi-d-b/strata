@@ -1,0 +1,23 @@
+{
+  "name": "plc4x-simulated",
+  "config": {
+    "connector.class": "org.apache.plc4x.kafka.Plc4xSourceConnector",
+    "tasks.max": "1",
+    "default.topic": "plc.raw",
+
+    "_comment_sources": "Une 'source' = un automate. Ici le driver simulated:// (automate virtuel intégré à PLC4X) : aucune machine requise. Pour du réel, remplacer la valeur par s7://IP, modbus-tcp://IP, eip://IP.",
+    "sources": "demo",
+    "sources.demo.connectionString": "simulated://127.0.0.1",
+    "sources.demo.pollReturnInterval": "1000",
+    "sources.demo.bufferSize": "100",
+
+    "_comment_jobs": "Un 'job' = un groupe de tags à scruter, avec son intervalle (ms). Les adresses RANDOM/... du driver simulated génèrent des valeurs aléatoires du type demandé.",
+    "sources.demo.jobReferences": "scan",
+    "jobs": "scan",
+    "jobs.scan.interval": "1000",
+    "jobs.scan.tags": "temperature,pression,compteur",
+    "jobs.scan.tags.temperature": "RANDOM/temp:DINT",
+    "jobs.scan.tags.pression": "RANDOM/press:DINT",
+    "jobs.scan.tags.compteur": "RANDOM/count:DINT"
+  }
+}

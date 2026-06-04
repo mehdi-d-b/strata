@@ -1,0 +1,25 @@
+{
+  "_README": "Connecteur PLC4X pour Modbus TCP (Schneider, variateurs, capteurs, passerelles…). Par défaut en simulated:// (testable sans matériel). Pour brancher un vrai équipement : remplacer connectionString par modbus-tcp://<IP>, et les adresses RANDOM/... par de vraies adresses Modbus. Déployer : curl -X POST localhost:8083/connectors -H 'content-type: application/json' -d @connectors/plc4x/11-schneider-modbus.json",
+
+  "name": "plc4x-modbus",
+  "config": {
+    "connector.class": "org.apache.plc4x.kafka.Plc4xSourceConnector",
+    "tasks.max": "1",
+    "default.topic": "plc.raw",
+
+    "_comment_source": "RÉEL : 'modbus-tcp://192.168.0.20'  (option : ?unit-identifier=1 pour l'esclave)",
+    "sources": "modbusdev",
+    "sources.modbusdev.connectionString": "simulated://127.0.0.1",
+    "sources.modbusdev.pollReturnInterval": "1000",
+    "sources.modbusdev.bufferSize": "100",
+
+    "_comment_addresses": "RÉEL Modbus : holding-register:1:INT (registre 40001), holding-register:1:DINT (2 registres), input-register:1:INT (3xxxx), coil:1:BOOL (0xxxx), discrete-input:1:BOOL (1xxxx). Ici RANDOM/... = valeurs simulées.",
+    "sources.modbusdev.jobReferences": "scan",
+    "jobs": "scan",
+    "jobs.scan.interval": "1000",
+    "jobs.scan.tags": "temperature,pression,compteur",
+    "jobs.scan.tags.temperature": "RANDOM/temp:DINT",
+    "jobs.scan.tags.pression": "RANDOM/press:DINT",
+    "jobs.scan.tags.compteur": "RANDOM/count:DINT"
+  }
+}

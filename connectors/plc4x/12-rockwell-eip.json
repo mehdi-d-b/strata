@@ -1,0 +1,25 @@
+{
+  "_README": "Connecteur PLC4X pour Rockwell / Allen-Bradley via EtherNet/IP (ControlLogix, CompactLogix, Micro800). Par défaut en simulated:// (testable sans matériel). Pour brancher un vrai automate : remplacer connectionString par eip://<IP>, et les adresses RANDOM/... par de vrais noms de tags AB. Déployer : curl -X POST localhost:8083/connectors -H 'content-type: application/json' -d @connectors/plc4x/12-rockwell-eip.json",
+
+  "name": "plc4x-rockwell",
+  "config": {
+    "connector.class": "org.apache.plc4x.kafka.Plc4xSourceConnector",
+    "tasks.max": "1",
+    "default.topic": "plc.raw",
+
+    "_comment_source": "RÉEL : 'eip://192.168.0.30'  (option : ?backplane=1&slot=0 pour ControlLogix)",
+    "sources": "ablogix",
+    "sources.ablogix.connectionString": "simulated://127.0.0.1",
+    "sources.ablogix.pollReturnInterval": "1000",
+    "sources.ablogix.bufferSize": "100",
+
+    "_comment_addresses": "RÉEL Allen-Bradley : les tags sont NOMMÉS (tags symboliques du programme). Ex : Temperature:DINT, Ligne_Pression:REAL, Compteur_OK:DINT, MonTableau[0]:INT. Ici RANDOM/... = valeurs simulées.",
+    "sources.ablogix.jobReferences": "scan",
+    "jobs": "scan",
+    "jobs.scan.interval": "1000",
+    "jobs.scan.tags": "temperature,pression,compteur",
+    "jobs.scan.tags.temperature": "RANDOM/temp:DINT",
+    "jobs.scan.tags.pression": "RANDOM/press:DINT",
+    "jobs.scan.tags.compteur": "RANDOM/count:DINT"
+  }
+}

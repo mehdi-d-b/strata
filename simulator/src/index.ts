@@ -24,10 +24,13 @@ let cptOk = 0; // pièces bonnes
 let cptScrap = 0; // pièces au rebut
 const t0 = Date.now();
 
+// Topics MQTT au format factory/<site>/<ligne>/<machine>/<mesure> : le
+// normaliseur retire `factory` et joint le reste -> tag métier hiérarchique
+// usine1.ligne1.presse.<mesure> (cf. convention dans CLAUDE.md).
 const tags: Tag[] = [
   {
     // Compteur pièces OK : ~1 pièce/s, avec irrégularité.
-    topic: "factory/ligne1/pieces_ok",
+    topic: "factory/usine1/ligne1/presse/pieces_ok",
     next: () => {
       if (Math.random() < 0.8) cptOk += 1;
       return cptOk;
@@ -35,7 +38,7 @@ const tags: Tag[] = [
   },
   {
     // Compteur rebut : monte beaucoup plus lentement (~5 % du flux).
-    topic: "factory/ligne1/pieces_rebut",
+    topic: "factory/usine1/ligne1/presse/pieces_rebut",
     next: () => {
       if (Math.random() < 0.05) cptScrap += 1;
       return cptScrap;
@@ -43,7 +46,7 @@ const tags: Tag[] = [
   },
   {
     // Température : sinusoïde autour de 60 °C + bruit.
-    topic: "factory/ligne1/temperature",
+    topic: "factory/usine1/ligne1/four/temperature",
     next: () => {
       const t = (Date.now() - t0) / 1000;
       return 60 + 8 * Math.sin(t / 30) + (Math.random() - 0.5);
@@ -51,7 +54,7 @@ const tags: Tag[] = [
   },
   {
     // Vitesse ligne : autour de 1500 tr/min + bruit.
-    topic: "factory/ligne1/vitesse",
+    topic: "factory/usine1/ligne1/presse/vitesse",
     next: () => 1500 + 50 * Math.sin(Date.now() / 7000) + (Math.random() - 0.5) * 10,
   },
 ];

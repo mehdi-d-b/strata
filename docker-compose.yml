@@ -132,6 +132,48 @@ services:
       - ./connectors/raw-to-timescale.yaml:/connect.yaml:ro
     restart: unless-stopped
 
+  # --- Phase 4 : industriel via PLC4X (profil optionnel `plc4x`) ----------
+  # Démarre uniquement avec : docker compose --profile plc4x up -d
+  # C'est le SEUL container JVM ; le stack par défaut reste sans JVM.
+  kafka-connect:
+    build: ./infra/kafka-connect
+    container_name: strata-kafka-connect
+    profiles: ["plc4x"]
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    ports:
+      - "8083:8083"   # API REST de Kafka Connect
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: redpanda:9092
+      CONNECT_GROUP_ID: strata-connect
+      CONNECT_CONFIG_STORAGE_TOPIC: _connect-configs
+      CONNECT_OFFSET_STORAGE_TOPIC: _connect-offsets
+      CONNECT_STATUS_STORAGE_TOPIC: _connect-status
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: "1"
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: "1"
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: "1"
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
+      CONNECT_PLUGIN_PATH: /usr/share/java
+    restart: unless-stopped
+
+  # Redpanda Connect : renormalise plc.raw (format PLC4X) -> tags.raw (contrat Strata).
+  connect-plc4x-to-raw:
+    image: docker.redpanda.com/redpandadata/connect:latest
+    container_name: strata-connect-plc4x
+    profiles: ["plc4x"]
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    command: ["run", "/connect.yaml"]
+    volumes:
+      - ./connectors/plc4x-to-raw.yaml:/connect.yaml:ro
+    restart: unless-stopped
+
   # Gateway temps réel : Redpanda tags.raw -> WebSocket, + historique REST.
   gateway:
     build: ./gateway

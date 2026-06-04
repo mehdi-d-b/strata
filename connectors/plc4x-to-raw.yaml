@@ -1,0 +1,57 @@
+# Redpanda Connect — renormalise le topic PLC4X `plc.raw` vers le contrat `tags.raw`.
+#
+# PLC4X émet UN message par job, contenant TOUS ses tags groupés, avec les ALIAS
+# définis dans la config du connecteur (pas les adresses physiques) :
+#   key   = {"sourceName":"demo","jobName":"scan"}
+#   value = {"tags":{"temperature":123,"pression":456},"timestamp":1780568826389}
+#
+# Convention Strata (cf. CLAUDE.md) : le `tag` est un nom MÉTIER hiérarchique
+# `site.ligne.machine.mesure`, indépendant du protocole. On le compose donc en
+#   <base métier de la source> + "." + <alias du point>
+# La base métier est attachée à la source PLC4X via la table ci-dessous. C'est le
+# seul endroit qui traduit "automate physique" -> "emplacement métier" ; il pourra
+# migrer en base/UI plus tard sans toucher au reste.
+
+input:
+  kafka_franz:
+    seed_brokers: ["redpanda:9092"]
+    topics: ["plc.raw"]
+    consumer_group: "strata-plc4x-normalize"
+
+pipeline:
+  processors:
+    - mapping: |
+        # Le sourceName PLC4X est dans la CLÉ Kafka : {"sourceName":"demo","jobName":"scan"}
+        let source_name = meta("kafka_key").parse_json().sourceName.or("")
+
+        # Mapping sourceName PLC4X (= nom de la source dans la config du connecteur)
+        # -> base métier hiérarchique. À enrichir quand on ajoute de vrais automates.
+        let source_base = {
+          "demo":      "usine1.ligne1",
+          "s7line":    "usine1.ligne1",
+          "modbusdev": "usine1.ligne2",
+          "ablogix":   "usine1.ligne3"
+        }
+        let base = $source_base.get($source_name).or("usine1.inconnu")
+
+        let ts = this.timestamp
+
+        # Éclate l'objet `tags` en un message par point, au contrat Strata.
+        root = this.tags.key_values().map_each(kv -> {
+          "tag":     $base + "." + kv.key,
+          "value":   kv.value,
+          "ts":      ($ts / 1000).ts_format("2006-01-02T15:04:05Z07:00", "UTC"),
+          "quality": "good",
+          "source":  "plc4x"
+        })
+
+    # Un message par tag (et non un tableau).
+    - unarchive:
+        format: json_array
+
+output:
+  kafka_franz:
+    seed_brokers: ["redpanda:9092"]
+    topic: "tags.raw"
+    key: '${! json("tag") }'
+    compression: none
