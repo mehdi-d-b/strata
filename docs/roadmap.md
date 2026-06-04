@@ -30,11 +30,15 @@ couches. Chaque phase est démontrable seule.
 - [x] Bonus UX : libellés + unités dans le graphe, sélecteur de plage (5/15/60 min)
 - [ ] *Reporté* : scan rate / source par tag, paramètres globaux (pas nécessaires à ce stade)
 
-## Phase 3 — Agrégats & dashboards métier
+## Phase 3 — Agrégats & dashboards métier ⬅️ *fait*
 **But : dashboard production/shift en ETL « transparent ».**
-- [ ] Continuous aggregates Timescale (prod/shift, moyennes, ébauche OEE)
-- [ ] Modèle de shifts
-- [ ] Pages dashboard : courbes historiques avec zoom, multi-tags, KPIs
+- [x] Continuous aggregate `prod_buckets` (delta = max−min par 15 min, gère les resets)
+- [x] Modèle de shifts **versionné** (`shift_schedule.valid_from`) — gère 2→3 shifts, horaires
+      qui changent, sans réécrire l'historique
+- [x] Rôles de compteurs (`tag_role` : produced/ok/scrap/available) — « SAP-lite »
+- [x] Vues d'attribution `prod_by_shift` / `prod_by_shift_role` (attribution au shift à la lecture)
+- [x] Onglet web « Production » : tableau par shift (OK/rebut/taux), édition planning + rôles
+- [ ] *Reporté* : OEE complet, multi-lignes, courbes historiques avec zoom
 
 ## Phase 4 — Le vrai industriel
 **But : sortir du simulateur, brancher de vrais protocoles.**
