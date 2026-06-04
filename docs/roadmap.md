@@ -52,12 +52,48 @@ couches. Chaque phase est démontrable seule.
 - [ ] libplctag : option no-JVM pour Allen-Bradley en direct
 - [ ] Sink PLC4X : écriture de consignes dans les tags (le `Plc4xSinkConnector` est déjà dispo)
 
-## Phase 5 — Plus si affinité
-- [ ] RisingWave : streams dérivés temps réel, alarmes
-- [ ] SCADA / synoptiques, alarming, auth & utilisateurs
-- [ ] IA / détection d'anomalies
+## Phase 5 — Simulateur d'usine (cerveau riche, faces simples)
+**But : une usine virtuelle vivante et marrante pour les démos.**
+Architecture **cerveau / faces** : un seul process simule l'état de l'usine (machines,
+cadences, pannes, qualité), et l'expose via des « faces ». En P5 les faces sont simples
+(MQTT / OPC-UA). **Conçu pour accueillir les vraies faces protocolaires en P6 sans réécrire.**
+- [ ] Cerveau d'usine : modèle de machines, cadence, aléas (pannes, rebut, dérive)
+- [ ] Faces simples : publication MQTT (et/ou OPC-UA) par « automate » virtuel
+- [ ] Frontière nette cerveau↔face (un bus interne / une interface) pour brancher P6
+- [ ] Scénario de démo scriptable (montée en régime, incident, reprise)
 
-## Transverse
+## Phase 6 — Simulateur, vraies faces protocolaires
+**But : que PLC4X se connecte au simulateur comme à de vrais automates.**
+- [ ] Serveur **Modbus TCP** (le plus simple) exposant une partie du cerveau
+- [ ] Serveur **Siemens S7** (Snap7) — coriace
+- [ ] Serveur **Allen-Bradley EtherNet/IP** (cpppo…) — le plus dur
+- [ ] Note langue : écosystème serveur le + riche = **Python** (pymodbus/python-snap7/cpppo) ;
+      le cerveau peut rester en Go/Rust et exposer les faces via un petit adaptateur.
+
+## Phase 7 — Comptes & contrôle d'accès (RBAC) 🔒
+**But : sécuriser TOUTE l'appli (aujourd'hui toutes les routes gateway sont ouvertes).**
+**Prérequis du sink PLC (P8)** : pas d'écriture vers un automate sans droits.
+- [ ] Modèle utilisateurs + authentification (login, sessions/JWT)
+- [ ] Rôles & droits **par groupe de tags / site / machine** (ex : écrire sur 1 seule ligne)
+- [ ] Protéger les routes existantes (édition tags, shifts, rôles…) derrière l'auth
+- [ ] Journal d'audit (qui a écrit quoi, quand) — utile surtout pour les écritures PLC
+
+## Phase 8 — Écriture vers les PLC (sink) ✍️
+**But : envoyer des consignes aux automates, encadré par les droits P7.**
+- [ ] Connecteur `Plc4xSinkConnector` (déjà chargé dans Kafka Connect) : topic `tags.cmd` → PLC
+- [ ] Vérif des droits (P7) avant toute écriture + entrée d'audit
+- [ ] UI d'écriture de consigne (réservée aux utilisateurs autorisés)
+
+## Phase 9 — Plus si affinité
+- [ ] RisingWave : streams dérivés temps réel, alarmes
+- [ ] SCADA / synoptiques, alarming
+- [ ] IA / détection d'anomalies
+- [ ] OEE complet (dispo × perf × qualité)
+
+## Transverse (au fil de l'eau)
 - Observabilité : Redpanda Console (P0) + Grafana plus tard
+- **Rétention/compression Timescale** : `mesures` grossit indéfiniment aujourd'hui — ajouter
+  une politique de rétention + compression avant tout usage « prod »
 - Packaging : Compose (P0) ; installeur natif par OS = polish très tardif, non prioritaire
 - CI légère quand le code grossit
+- Sécurité : secrets en clair dans le compose (mots de passe) — externaliser avant prod
