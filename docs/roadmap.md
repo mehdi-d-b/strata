@@ -52,15 +52,16 @@ couches. Chaque phase est démontrable seule.
 - [ ] libplctag : option no-JVM pour Allen-Bradley en direct
 - [ ] Sink PLC4X : écriture de consignes dans les tags (le `Plc4xSinkConnector` est déjà dispo)
 
-## Phase 5 — Simulateur d'usine (cerveau riche, faces simples)
+## Phase 5 — Simulateur d'usine (cerveau riche, faces simples) ⬅️ *fait* 🍺
 **But : une usine virtuelle vivante et marrante pour les démos.**
-Architecture **cerveau / faces** : un seul process simule l'état de l'usine (machines,
-cadences, pannes, qualité), et l'expose via des « faces ». En P5 les faces sont simples
-(MQTT / OPC-UA). **Conçu pour accueillir les vraies faces protocolaires en P6 sans réécrire.**
-- [ ] Cerveau d'usine : modèle de machines, cadence, aléas (pannes, rebut, dérive)
-- [ ] Faces simples : publication MQTT (et/ou OPC-UA) par « automate » virtuel
-- [ ] Frontière nette cerveau↔face (un bus interne / une interface) pour brancher P6
-- [ ] Scénario de démo scriptable (montée en régime, incident, reprise)
+Thème : **micro-brasserie** (2 recettes : Blonde lager, IPA ale). Python.
+Architecture **cerveau / faces** conçue pour accueillir les vraies faces en P6 sans réécrire.
+- [x] Cerveau brassicole protocol-agnostique : cuves empâtage→ébullition→fermentation→embouteillage
+- [x] Hook réaliste : écart à la **température cible** → dégrade la qualité → pilote le **rebut**
+      (~2-3 % en régime, pic localisé lors d'un incident). Embouteilleuse en attente si moût pas prêt.
+- [x] Face MQTT (lit l'état du cerveau, le publie). Frontière nette cerveau↔face.
+- [x] Moteur de scénarios scriptés (journée : incidents thermiques, panne embouteilleuse, reprise)
+- [ ] *Reporté* : face OPC-UA simple (optionnel, avant les vrais serveurs de P6)
 
 ## Phase 6 — Simulateur, vraies faces protocolaires
 **But : que PLC4X se connecte au simulateur comme à de vrais automates.**
