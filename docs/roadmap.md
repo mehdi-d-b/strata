@@ -121,10 +121,10 @@ déploiement. Aucune ne presse pour une démo.
 - À faire : valider la session à l'ouverture du WS + **filtrer** les tags poussés selon les
   droits de lecture de l'utilisateur (le filtrage est une feature en soi).
 
-### 🟠 Secrets en clair dans le compose
-- Mot de passe Timescale en dur + `ADMIN_PASSWORD` défaut `admin`, versionnés dans Git.
-- À faire : externaliser dans `.env` (déjà gitignored), forcer le changement du mot de passe
-  admin au 1er login, documenter. Hygiène à régler **avant toute exposition**.
+### ✅ Secrets hors du compose — *fait*
+- Credentials Timescale + `ADMIN_PASSWORD` via `.env` (gitignored) ; `.env.example` documenté.
+- `seedAdmin` ne logue plus le mot de passe ; alerte forte si le défaut `admin` est encore utilisé.
+- *Reste optionnel* : forcer le changement du mot de passe admin au 1er login (UI).
 
 ### Idée — Gestion de TimescaleDB depuis l'UI (onglet « Stockage », admin)
 Régler depuis l'appli : durée de rétention du brut, activation/seuil de compression,
