@@ -1,10 +1,10 @@
-FROM node:22-alpine
+FROM python:3.12-slim
 WORKDIR /app
 
 # Dépendances d'abord (cache Docker).
-COPY package.json ./
-RUN npm install
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD ["npm", "start"]
+CMD ["python", "-u", "main.py"]
