@@ -71,13 +71,17 @@ Architecture **cerveau / faces** conçue pour accueillir les vraies faces en P6 
 - [ ] Note langue : écosystème serveur le + riche = **Python** (pymodbus/python-snap7/cpppo) ;
       le cerveau peut rester en Go/Rust et exposer les faces via un petit adaptateur.
 
-## Phase 7 — Comptes & contrôle d'accès (RBAC) 🔒
+## Phase 7 — Comptes & contrôle d'accès (RBAC) 🔒 ⬅️ *fait*
 **But : sécuriser TOUTE l'appli (aujourd'hui toutes les routes gateway sont ouvertes).**
 **Prérequis du sink PLC (P8)** : pas d'écriture vers un automate sans droits.
-- [ ] Modèle utilisateurs + authentification (login, sessions/JWT)
-- [ ] Rôles & droits **par groupe de tags / site / machine** (ex : écrire sur 1 seule ligne)
-- [ ] Protéger les routes existantes (édition tags, shifts, rôles…) derrière l'auth
-- [ ] Journal d'audit (qui a écrit quoi, quand) — utile surtout pour les écritures PLC
+- [x] Modèle utilisateurs + authentification (scrypt, sessions cookie httpOnly révocables)
+- [x] Rôles & droits **par préfixe de tag** (scope = `site.ligne.machine`, action read/write/admin)
+      → ex : opérateur limité à `brasserie.blonde`. Testé : write blonde OK / write ipa 403.
+- [x] Routes existantes protégées (écriture tag = droit sur le tag ; réglages globaux = admin)
+- [x] Journal d'audit (login, créations, écritures…)
+- [x] Front : login, gate de l'appli, page Admin (users, rôles/droits, audit)
+- [ ] *Reporté* : sécuriser le WebSocket temps réel (lecture non authentifiée pour l'instant)
+- [ ] *Reporté* : masquer/désactiver les boutons selon les droits (passe shadcn)
 
 ## Phase 8 — Écriture vers les PLC (sink) ✍️
 **But : envoyer des consignes aux automates, encadré par les droits P7.**
