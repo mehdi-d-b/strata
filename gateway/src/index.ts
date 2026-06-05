@@ -16,6 +16,19 @@ import Fastify from "fastify";
 import websocket from "@fastify/websocket";
 import { Kafka, logLevel } from "kafkajs";
 import pg from "pg";
+import {
+  can,
+  clearSessionCookie,
+  createSession,
+  destroySession,
+  hashPassword,
+  isAdmin,
+  loadUserFromSession,
+  readSessionCookie,
+  setSessionCookie,
+  verifyPassword,
+  type AuthUser,
+} from "./auth.js";
 
 const KAFKA_BROKERS = (process.env.KAFKA_BROKERS ?? "redpanda:9092").split(",");
 const PG_DSN =
@@ -82,6 +95,76 @@ const clients = new Set<import("ws").WebSocket>();
 
 app.get("/health", async () => ({ status: "ok" }));
 
+// ─── Authentification (Phase 7) ───────────────────────────────────────────
+
+/** Trace une action sensible dans l'audit. */
+async function audit(
+  username: string | null,
+  action: string,
+  target: string | null = null,
+  detail: unknown = null,
+): Promise<void> {
+  await pool.query(
+    "INSERT INTO audit_log (username, action, target, detail) VALUES ($1,$2,$3,$4)",
+    [username, action, target, detail ? JSON.stringify(detail) : null],
+  );
+}
+
+// Sur chaque requête : résout l'utilisateur courant depuis le cookie de session.
+app.addHook("preHandler", async (req) => {
+  req.user = null;
+  const sid = readSessionCookie(req);
+  if (sid) {
+    try {
+      req.user = await loadUserFromSession(pool, sid);
+    } catch {
+      req.user = null;
+    }
+  }
+});
+
+/** preHandler : exige un utilisateur connecté. */
+async function requireAuth(req: { user: AuthUser | null }, reply: import("fastify").FastifyReply) {
+  if (!req.user) return reply.code(401).send({ error: "non authentifié" });
+}
+
+/** preHandler : exige un administrateur. */
+async function requireAdmin(req: { user: AuthUser | null }, reply: import("fastify").FastifyReply) {
+  if (!req.user) return reply.code(401).send({ error: "non authentifié" });
+  if (!isAdmin(req.user)) return reply.code(403).send({ error: "réservé aux admins" });
+}
+
+app.post("/api/auth/login", async (req, reply) => {
+  const b = req.body as { username?: string; password?: string };
+  if (!b.username || !b.password)
+    return reply.code(400).send({ error: "username et password requis" });
+  const { rows } = await pool.query(
+    "SELECT id, password_hash FROM users WHERE username = $1 AND enabled",
+    [b.username],
+  );
+  const ok = rows.length > 0 && (await verifyPassword(b.password, rows[0].password_hash));
+  if (!ok) {
+    await audit(b.username, "login.fail");
+    return reply.code(401).send({ error: "identifiants invalides" });
+  }
+  const sid = await createSession(pool, rows[0].id);
+  setSessionCookie(reply, sid);
+  await audit(b.username, "login.ok");
+  return loadUserFromSession(pool, sid);
+});
+
+app.post("/api/auth/logout", async (req, reply) => {
+  const sid = readSessionCookie(req);
+  if (sid) await destroySession(pool, sid);
+  clearSessionCookie(reply);
+  return { ok: true };
+});
+
+// Qui suis-je ? (le front l'appelle au chargement pour connaître l'état de session)
+app.get("/api/auth/me", async (req) => {
+  return req.user ?? null;
+});
+
 // Liste des tags configurés (avec métadonnées).
 app.get("/api/tags", async () => {
   const { rows } = await pool.query(
@@ -91,10 +174,12 @@ app.get("/api/tags", async () => {
   return rows;
 });
 
-// Upsert d'un tag.
-app.post("/api/tags", async (req, reply) => {
+// Upsert d'un tag. Exige le droit d'écriture sur le tag concerné.
+app.post("/api/tags", { preHandler: requireAuth }, async (req, reply) => {
   const b = req.body as Partial<TagConfig> & { name?: string };
   if (!b.name) return reply.code(400).send({ error: "champ 'name' requis" });
+  if (!can(req.user, "write", b.name))
+    return reply.code(403).send({ error: `pas le droit d'écrire sur ${b.name}` });
   await pool.query(
     `INSERT INTO tags (name, label, unit, scale, offset_val, enabled, description, updated_at)
      VALUES ($1, $2, $3, COALESCE($4,1), COALESCE($5,0), COALESCE($6,true), $7, now())
@@ -113,10 +198,13 @@ app.post("/api/tags", async (req, reply) => {
 });
 
 // Suppression de la config d'un tag (l'historique dans `mesures` est conservé).
-app.delete("/api/tags/:name", async (req) => {
+app.delete("/api/tags/:name", { preHandler: requireAuth }, async (req, reply) => {
   const { name } = req.params as { name: string };
+  if (!can(req.user, "write", name))
+    return reply.code(403).send({ error: `pas le droit d'écrire sur ${name}` });
   await pool.query("DELETE FROM tags WHERE name = $1", [name]);
   await refreshTagCache();
+  await audit(req.user!.username, "tag.delete", name);
   return { deleted: name };
 });
 
@@ -163,8 +251,8 @@ app.get("/api/shifts", async () => {
   return rows;
 });
 
-// Upsert d'une ligne de planning.
-app.post("/api/shifts", async (req, reply) => {
+// Upsert d'une ligne de planning. Réglage global -> admin.
+app.post("/api/shifts", { preHandler: requireAdmin }, async (req, reply) => {
   const b = req.body as {
     valid_from?: string;
     shift_no?: number;
@@ -186,8 +274,8 @@ app.post("/api/shifts", async (req, reply) => {
   return { ok: true };
 });
 
-// Suppression d'une ligne de planning.
-app.delete("/api/shifts/:validFrom/:shiftNo", async (req) => {
+// Suppression d'une ligne de planning. Réglage global -> admin.
+app.delete("/api/shifts/:validFrom/:shiftNo", { preHandler: requireAdmin }, async (req) => {
   const { validFrom, shiftNo } = req.params as { validFrom: string; shiftNo: string };
   await pool.query(
     "DELETE FROM shift_schedule WHERE valid_from = $1 AND shift_no = $2",
@@ -204,8 +292,8 @@ app.get("/api/tag-roles", async () => {
   return rows;
 });
 
-// Définit/retire le rôle d'un tag. role=null pour retirer.
-app.post("/api/tag-roles", async (req, reply) => {
+// Définit/retire le rôle d'un tag. role=null pour retirer. Réglage global -> admin.
+app.post("/api/tag-roles", { preHandler: requireAdmin }, async (req, reply) => {
   const b = req.body as { tag_name?: string; role?: string | null };
   if (!b.tag_name) return reply.code(400).send({ error: "tag_name requis" });
   // Un tag a au plus un rôle ici : on nettoie puis on (ré)insère.
@@ -217,6 +305,129 @@ app.post("/api/tag-roles", async (req, reply) => {
     ]);
   }
   return { ok: true };
+});
+
+// ─── Administration des utilisateurs & droits (Phase 7, admin only) ────────
+
+// Liste des utilisateurs avec leurs rôles.
+app.get("/api/users", { preHandler: requireAdmin }, async () => {
+  const { rows } = await pool.query(
+    `SELECT u.id, u.username, u.display_name, u.enabled,
+            COALESCE(array_agg(ur.role) FILTER (WHERE ur.role IS NOT NULL), '{}') AS roles
+     FROM users u LEFT JOIN user_roles ur ON ur.user_id = u.id
+     GROUP BY u.id ORDER BY u.username`,
+  );
+  return rows;
+});
+
+// Crée un utilisateur (+ rôles optionnels).
+app.post("/api/users", { preHandler: requireAdmin }, async (req, reply) => {
+  const b = req.body as {
+    username?: string;
+    password?: string;
+    display_name?: string;
+    roles?: string[];
+  };
+  if (!b.username || !b.password)
+    return reply.code(400).send({ error: "username et password requis" });
+  const hash = await hashPassword(b.password);
+  const { rows } = await pool.query(
+    `INSERT INTO users (username, password_hash, display_name) VALUES ($1,$2,$3)
+     ON CONFLICT (username) DO NOTHING RETURNING id`,
+    [b.username, hash, b.display_name ?? null],
+  );
+  if (rows.length === 0)
+    return reply.code(409).send({ error: "utilisateur déjà existant" });
+  const userId = rows[0].id;
+  for (const role of b.roles ?? []) {
+    await pool.query(
+      "INSERT INTO user_roles (user_id, role) VALUES ($1,$2) ON CONFLICT DO NOTHING",
+      [userId, role],
+    );
+  }
+  await audit(req.user!.username, "user.create", b.username, { roles: b.roles });
+  return { id: userId };
+});
+
+// Met à jour les rôles d'un utilisateur (remplace l'ensemble).
+app.put("/api/users/:id/roles", { preHandler: requireAdmin }, async (req) => {
+  const { id } = req.params as { id: string };
+  const b = req.body as { roles?: string[] };
+  await pool.query("DELETE FROM user_roles WHERE user_id = $1", [Number(id)]);
+  for (const role of b.roles ?? []) {
+    await pool.query(
+      "INSERT INTO user_roles (user_id, role) VALUES ($1,$2) ON CONFLICT DO NOTHING",
+      [Number(id), role],
+    );
+  }
+  await audit(req.user!.username, "user.roles", id, { roles: b.roles });
+  return { ok: true };
+});
+
+// Réinitialise le mot de passe d'un utilisateur.
+app.put("/api/users/:id/password", { preHandler: requireAdmin }, async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const b = req.body as { password?: string };
+  if (!b.password) return reply.code(400).send({ error: "password requis" });
+  await pool.query("UPDATE users SET password_hash = $1 WHERE id = $2", [
+    await hashPassword(b.password),
+    Number(id),
+  ]);
+  // Révoque les sessions existantes de cet utilisateur.
+  await pool.query("DELETE FROM sessions WHERE user_id = $1", [Number(id)]);
+  await audit(req.user!.username, "user.password", id);
+  return { ok: true };
+});
+
+// Active/désactive un utilisateur.
+app.put("/api/users/:id/enabled", { preHandler: requireAdmin }, async (req) => {
+  const { id } = req.params as { id: string };
+  const b = req.body as { enabled?: boolean };
+  await pool.query("UPDATE users SET enabled = $1 WHERE id = $2", [
+    b.enabled !== false,
+    Number(id),
+  ]);
+  if (b.enabled === false)
+    await pool.query("DELETE FROM sessions WHERE user_id = $1", [Number(id)]);
+  return { ok: true };
+});
+
+// Rôles disponibles + leurs droits (pour l'UI d'admin).
+app.get("/api/roles", { preHandler: requireAdmin }, async () => {
+  const { rows } = await pool.query(
+    `SELECT r.name, r.description,
+            COALESCE(json_agg(json_build_object('scope', g.scope, 'action', g.action))
+                     FILTER (WHERE g.role IS NOT NULL), '[]') AS grants
+     FROM roles r LEFT JOIN grants g ON g.role = r.name
+     GROUP BY r.name ORDER BY r.name`,
+  );
+  return rows;
+});
+
+// Définit les droits d'un rôle (remplace l'ensemble).
+app.put("/api/roles/:name/grants", { preHandler: requireAdmin }, async (req) => {
+  const { name } = req.params as { name: string };
+  const b = req.body as { grants?: { scope: string; action: string }[] };
+  await pool.query("DELETE FROM grants WHERE role = $1", [name]);
+  for (const g of b.grants ?? []) {
+    await pool.query(
+      "INSERT INTO grants (role, scope, action) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
+      [name, g.scope || "*", g.action],
+    );
+  }
+  await audit(req.user!.username, "role.grants", name, b.grants);
+  return { ok: true };
+});
+
+// Journal d'audit (dernières entrées).
+app.get("/api/audit", { preHandler: requireAdmin }, async (req) => {
+  const q = req.query as { limit?: string };
+  const limit = Math.min(500, Number(q.limit ?? 100));
+  const { rows } = await pool.query(
+    "SELECT ts, username, action, target, detail FROM audit_log ORDER BY ts DESC LIMIT $1",
+    [limit],
+  );
+  return rows;
 });
 
 app.register(async (f) => {
@@ -267,8 +478,30 @@ async function startConsumer() {
   app.log.info("consumer Redpanda démarré sur tags.raw");
 }
 
+/**
+ * Crée un compte admin initial s'il n'existe aucun utilisateur. Le mot de passe
+ * vient de ADMIN_PASSWORD (défaut: "admin", à changer au 1er login en prod).
+ */
+async function seedAdmin() {
+  const { rows } = await pool.query("SELECT count(*)::int AS n FROM users");
+  if (rows[0].n > 0) return;
+  const password = process.env.ADMIN_PASSWORD ?? "admin";
+  const hash = await hashPassword(password);
+  const ins = await pool.query(
+    "INSERT INTO users (username, password_hash, display_name) VALUES ('admin',$1,'Administrateur') RETURNING id",
+    [hash],
+  );
+  await pool.query("INSERT INTO user_roles (user_id, role) VALUES ($1,'admin')", [
+    ins.rows[0].id,
+  ]);
+  app.log.warn(
+    `[auth] compte 'admin' créé (mot de passe par défaut: '${password}') — à changer !`,
+  );
+}
+
 // --- Démarrage -------------------------------------------------------------
 async function main() {
+  await seedAdmin();
   await refreshTagCache();
   setInterval(() => refreshTagCache().catch(() => {}), 10_000); // garde le cache frais
   await app.listen({ host: "0.0.0.0", port: PORT });
