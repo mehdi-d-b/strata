@@ -216,3 +216,186 @@ table.tags input[type="time"] {
   border-radius: 5px;
   padding: 4px 6px;
 }
+
+/* ─── Auth : login ─────────────────────────────────────────────── */
+.login-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #8b97a7;
+}
+
+.login-card {
+  background: #11161d;
+  border: 1px solid #1d242e;
+  border-radius: 12px;
+  padding: 32px;
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.login-card h1 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 2px;
+  color: #e6edf3;
+}
+
+.login-card .sub {
+  font-size: 13px;
+  margin-top: -8px;
+}
+
+.login-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+  color: #8b97a7;
+}
+
+.login-card input {
+  background: #0e1116;
+  color: #e6edf3;
+  border: 1px solid #2d3645;
+  border-radius: 6px;
+  padding: 9px 11px;
+  font-size: 14px;
+}
+
+.login-card button[type="submit"] {
+  margin-top: 6px;
+  background: #1f6f3f;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.login-card button[type="submit"]:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.login-error {
+  background: #3a1d1d;
+  color: #f85149;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+/* ─── Header : boîte utilisateur ───────────────────────────────── */
+.user-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.user-name {
+  color: #e6edf3;
+}
+
+.user-box .ghost,
+header .ghost {
+  background: transparent;
+  border: 1px solid #2d3645;
+  color: #8b97a7;
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+/* ─── Admin : sous-navigation, chips, grants ───────────────────── */
+.subnav {
+  display: flex;
+  gap: 8px;
+}
+
+.subnav button {
+  background: #161b22;
+  color: #8b97a7;
+  border: 1px solid #2d3645;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.subnav button.active {
+  background: #11161d;
+  color: #e6edf3;
+  border-color: #3fb950;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  background: #0e1116;
+  color: #8b97a7;
+  border: 1px solid #2d3645;
+  border-radius: 999px;
+  padding: 3px 11px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chip.on {
+  background: #103a24;
+  color: #3fb950;
+  border-color: #1f6f3f;
+}
+
+.grant {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #0e1116;
+  border: 1px solid #2d3645;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: #c9d1d9;
+}
+
+.grant-write {
+  border-color: #1f6f3f;
+}
+.grant-admin {
+  border-color: #8957e5;
+}
+
+.grant .x {
+  background: transparent;
+  border: none;
+  color: #f85149;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+}
+
+.newrow {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.newrow input {
+  background: #0e1116;
+  color: #e6edf3;
+  border: 1px solid #2d3645;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 13px;
+}

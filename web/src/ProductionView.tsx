@@ -36,7 +36,9 @@ export function ProductionView() {
     fetchTags().then(setTags).catch(() => setTags([]));
     fetchTagRoles().then(setRoles).catch(() => setRoles([]));
   };
-  useEffect(loadAll, []);
+  useEffect(() => {
+    loadAll();
+  }, []);
 
   const roleOf = (tagName: string): Role | "" =>
     (roles.find((r) => r.tag_name === tagName)?.role as Role) ?? "";

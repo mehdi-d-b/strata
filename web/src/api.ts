@@ -1,3 +1,34 @@
+/** Erreur HTTP enrichie du code de statut (pour distinguer 401/403…). */
+export class ApiError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+  }
+}
+
+/** Wrapper fetch : envoie le cookie de session et lève une ApiError si !ok. */
+export async function api<T = unknown>(
+  path: string,
+  opts: RequestInit = {},
+): Promise<T> {
+  const r = await fetch(path, {
+    credentials: "include",
+    headers: opts.body ? { "content-type": "application/json", ...opts.headers } : opts.headers,
+    ...opts,
+  });
+  if (!r.ok) {
+    let msg = r.statusText;
+    try {
+      msg = (await r.json()).error ?? msg;
+    } catch {
+      /* corps non-JSON */
+    }
+    throw new ApiError(r.status, msg);
+  }
+  // 204/sans corps -> null
+  const text = await r.text();
+  return (text ? JSON.parse(text) : null) as T;
+}
+
 /** Config d'un tag telle qu'exposée par la gateway (Phase 2). */
 export type Tag = {
   name: string;
@@ -18,33 +49,18 @@ export type Mesure = {
   source?: string;
 };
 
-export async function fetchTags(): Promise<Tag[]> {
-  const r = await fetch("/api/tags");
-  return r.json();
-}
+export const fetchTags = () => api<Tag[]>("/api/tags");
 
-export async function saveTag(t: Tag): Promise<Tag> {
-  const r = await fetch("/api/tags", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(t),
-  });
-  return r.json();
-}
+export const saveTag = (t: Tag) =>
+  api<Tag>("/api/tags", { method: "POST", body: JSON.stringify(t) });
 
-export async function deleteTag(name: string): Promise<void> {
-  await fetch(`/api/tags/${encodeURIComponent(name)}`, { method: "DELETE" });
-}
+export const deleteTag = (name: string) =>
+  api(`/api/tags/${encodeURIComponent(name)}`, { method: "DELETE" });
 
-export async function fetchHistory(
-  tag: string,
-  minutes: number,
-): Promise<{ ts: string; value: number }[]> {
-  const r = await fetch(
+export const fetchHistory = (tag: string, minutes: number) =>
+  api<{ ts: string; value: number }[]>(
     `/api/history?tag=${encodeURIComponent(tag)}&minutes=${minutes}`,
   );
-  return r.json();
-}
 
 /** Libellé d'affichage d'un tag : label si présent, sinon son nom. */
 export function tagLabel(t: Tag): string {
@@ -76,37 +92,94 @@ export type TagRoleRow = { tag_name: string; role: string };
 export const ROLES = ["produced", "ok", "scrap", "available"] as const;
 export type Role = (typeof ROLES)[number];
 
-export async function fetchProduction(days = 7): Promise<ProductionRow[]> {
-  const r = await fetch(`/api/production?days=${days}`);
-  return r.json();
-}
+export const fetchProduction = (days = 7) =>
+  api<ProductionRow[]>(`/api/production?days=${days}`);
 
-export async function fetchShifts(): Promise<ShiftRow[]> {
-  const r = await fetch("/api/shifts");
-  return r.json();
-}
+export const fetchShifts = () => api<ShiftRow[]>("/api/shifts");
 
-export async function saveShift(s: ShiftRow): Promise<void> {
-  await fetch("/api/shifts", {
+export const saveShift = (s: ShiftRow) =>
+  api("/api/shifts", { method: "POST", body: JSON.stringify(s) });
+
+export const deleteShift = (validFrom: string, shiftNo: number) =>
+  api(`/api/shifts/${validFrom}/${shiftNo}`, { method: "DELETE" });
+
+export const fetchTagRoles = () => api<TagRoleRow[]>("/api/tag-roles");
+
+export const saveTagRole = (tag_name: string, role: Role | "") =>
+  api("/api/tag-roles", {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(s),
-  });
-}
-
-export async function deleteShift(validFrom: string, shiftNo: number): Promise<void> {
-  await fetch(`/api/shifts/${validFrom}/${shiftNo}`, { method: "DELETE" });
-}
-
-export async function fetchTagRoles(): Promise<TagRoleRow[]> {
-  const r = await fetch("/api/tag-roles");
-  return r.json();
-}
-
-export async function saveTagRole(tag_name: string, role: Role | ""): Promise<void> {
-  await fetch("/api/tag-roles", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
     body: JSON.stringify({ tag_name, role: role || null }),
   });
+
+// ─── Auth & administration (Phase 7) ──────────────────────────────────────
+
+export type Grant = { scope: string; action: "read" | "write" | "admin" };
+export type AuthUser = {
+  id: number;
+  username: string;
+  display_name: string | null;
+  roles: string[];
+  grants: Grant[];
+};
+
+export type UserRow = {
+  id: number;
+  username: string;
+  display_name: string | null;
+  enabled: boolean;
+  roles: string[];
+};
+
+export type RoleRow = { name: string; description: string | null; grants: Grant[] };
+
+export type AuditRow = {
+  ts: string;
+  username: string | null;
+  action: string;
+  target: string | null;
+  detail: unknown;
+};
+
+export const login = (username: string, password: string) =>
+  api<AuthUser>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+
+export const logout = () => api("/api/auth/logout", { method: "POST" });
+export const me = () => api<AuthUser | null>("/api/auth/me");
+
+/** L'utilisateur a-t-il un droit admin (côté UI ; le backend reste l'autorité) ? */
+export function userIsAdmin(u: AuthUser | null): boolean {
+  return !!u?.grants.some((g) => g.action === "admin");
 }
+
+/** L'utilisateur peut-il écrire sur ce tag (vérif UI, le backend tranche) ? */
+export function canWrite(u: AuthUser | null, tag = "*"): boolean {
+  if (!u) return false;
+  const covers = (scope: string) =>
+    scope === "*" || scope === "" || tag === scope || tag.startsWith(scope + ".");
+  return u.grants.some(
+    (g) => (g.action === "write" || g.action === "admin") && covers(g.scope),
+  );
+}
+
+export const fetchUsers = () => api<UserRow[]>("/api/users");
+export const createUser = (u: {
+  username: string;
+  password: string;
+  display_name?: string;
+  roles?: string[];
+}) => api<{ id: number }>("/api/users", { method: "POST", body: JSON.stringify(u) });
+export const setUserRoles = (id: number, roles: string[]) =>
+  api(`/api/users/${id}/roles`, { method: "PUT", body: JSON.stringify({ roles }) });
+export const setUserEnabled = (id: number, enabled: boolean) =>
+  api(`/api/users/${id}/enabled`, { method: "PUT", body: JSON.stringify({ enabled }) });
+export const resetUserPassword = (id: number, password: string) =>
+  api(`/api/users/${id}/password`, { method: "PUT", body: JSON.stringify({ password }) });
+
+export const fetchRoles = () => api<RoleRow[]>("/api/roles");
+export const setRoleGrants = (name: string, grants: Grant[]) =>
+  api(`/api/roles/${name}/grants`, { method: "PUT", body: JSON.stringify({ grants }) });
+
+export const fetchAudit = (limit = 100) => api<AuditRow[]>(`/api/audit?limit=${limit}`);
