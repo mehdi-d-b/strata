@@ -33,7 +33,8 @@ nav {
   gap: 8px;
 }
 
-nav button {
+nav button,
+nav a {
   background: transparent;
   border: 1px solid transparent;
   color: #8b97a7;
@@ -41,9 +42,11 @@ nav button {
   border-radius: 6px;
   cursor: pointer;
   font-size: 14px;
+  text-decoration: none;
 }
 
-nav button.active {
+nav button.active,
+nav a.active {
   background: #161b22;
   border-color: #2d3645;
   color: #e6edf3;
@@ -54,6 +57,184 @@ main {
   display: flex;
   flex-direction: column;
   gap: 24px;
+}
+
+/* ─── Temps réel avancé : layout 2 colonnes ────────────────────── */
+.live-layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.tag-picker {
+  background: #11161d;
+  border: 1px solid #1d242e;
+  border-radius: 10px;
+  padding: 12px;
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 120px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tag-search {
+  background: #0e1116;
+  color: #e6edf3;
+  border: 1px solid #2d3645;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.tag-list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tag-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #c9d1d9;
+}
+
+.tag-item:hover {
+  background: #161b22;
+}
+
+.tag-item.on {
+  background: #11202e;
+}
+
+.tag-item-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-item-unit {
+  color: #8b97a7;
+  font-size: 11px;
+}
+
+.live-main {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.multichart {
+  width: 100%;
+}
+
+.empty-chart {
+  height: 420px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #8b97a7;
+  font-size: 14px;
+}
+
+/* Chips des séries sélectionnées */
+.series-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.series-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #11161d;
+  border: 1px solid #1d242e;
+  border-radius: 999px;
+  padding: 4px 6px 4px 10px;
+  font-size: 12px;
+  color: #e6edf3;
+}
+
+.series-chip .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.series-chip-label {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.axis-toggle {
+  background: #0e1116;
+  border: 1px solid #2d3645;
+  color: #8b97a7;
+  border-radius: 5px;
+  padding: 2px 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.axis-toggle.right {
+  color: #58a6ff;
+  border-color: #1f4d7a;
+}
+
+.series-chip .x {
+  background: transparent;
+  border: none;
+  color: #f85149;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 4px;
+}
+
+/* ─── Accueil : grille de raccourcis ───────────────────────────── */
+.home-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.home-card {
+  display: block;
+  background: #11161d;
+  border: 1px solid #1d242e;
+  border-radius: 10px;
+  padding: 20px;
+  text-decoration: none;
+  transition: border-color 0.15s, transform 0.15s;
+}
+
+.home-card:hover {
+  border-color: #3fb950;
+  transform: translateY(-2px);
+}
+
+.home-card-title {
+  color: #e6edf3;
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.home-card-sub {
+  color: #8b97a7;
+  font-size: 13px;
 }
 
 .toolbar {
