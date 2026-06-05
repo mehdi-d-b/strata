@@ -29,6 +29,7 @@ import {
   verifyPassword,
   type AuthUser,
 } from "./auth.js";
+import { deployDevice, undeployDevice } from "./plc4x.js";
 
 const KAFKA_BROKERS = (process.env.KAFKA_BROKERS ?? "redpanda:9092").split(",");
 const PG_DSN =
@@ -350,6 +351,124 @@ app.post("/api/tag-roles", { preHandler: requireAdmin }, async (req, reply) => {
     ]);
   }
   return { ok: true };
+});
+
+// ─── Automates (devices) & adresses de tags (admin only) ──────────────────
+
+// Liste des automates + nombre de tags rattachés.
+app.get("/api/devices", { preHandler: requireAdmin }, async () => {
+  const { rows } = await pool.query(
+    `SELECT d.*, count(t.name)::int AS tag_count
+     FROM devices d LEFT JOIN tags t ON t.device = d.name
+     GROUP BY d.name ORDER BY d.name`,
+  );
+  return rows;
+});
+
+// Upsert d'un automate.
+app.post("/api/devices", { preHandler: requireAdmin }, async (req, reply) => {
+  const b = req.body as {
+    name?: string;
+    protocol?: string;
+    host?: string;
+    options?: string;
+    poll_ms?: number;
+    enabled?: boolean;
+    base_tag?: string;
+  };
+  if (!b.name || !b.protocol || !b.host)
+    return reply.code(400).send({ error: "name, protocol, host requis" });
+  await pool.query(
+    `INSERT INTO devices (name, protocol, host, options, poll_ms, enabled, base_tag)
+     VALUES ($1,$2,$3,$4,COALESCE($5,1000),COALESCE($6,true),$7)
+     ON CONFLICT (name) DO UPDATE SET
+       protocol=EXCLUDED.protocol, host=EXCLUDED.host, options=EXCLUDED.options,
+       poll_ms=EXCLUDED.poll_ms, enabled=EXCLUDED.enabled, base_tag=EXCLUDED.base_tag`,
+    [b.name, b.protocol, b.host, b.options ?? null, b.poll_ms, b.enabled, b.base_tag ?? null],
+  );
+  await audit(req.user!.username, "device.upsert", b.name);
+  return { ok: true };
+});
+
+// Suppression d'un automate (les tags rattachés perdent leur device, pas leur config).
+app.delete("/api/devices/:name", { preHandler: requireAdmin }, async (req) => {
+  const { name } = req.params as { name: string };
+  await pool.query("DELETE FROM devices WHERE name = $1", [name]);
+  await audit(req.user!.username, "device.delete", name);
+  return { ok: true };
+});
+
+// Tags d'un automate (avec leur adresse physique).
+app.get("/api/devices/:name/tags", { preHandler: requireAdmin }, async (req) => {
+  const { name } = req.params as { name: string };
+  const { rows } = await pool.query(
+    `SELECT name, label, unit, address, datatype, enabled
+     FROM tags WHERE device = $1 ORDER BY name`,
+    [name],
+  );
+  return rows;
+});
+
+// Met à jour l'adresse / le rattachement d'un tag (crée le tag si absent).
+app.post("/api/tags/:name/address", { preHandler: requireAdmin }, async (req, reply) => {
+  const { name } = req.params as { name: string };
+  const b = req.body as { device?: string | null; address?: string | null; datatype?: string | null };
+  await pool.query(
+    `INSERT INTO tags (name, label, device, address, datatype)
+     VALUES ($1, $1, $2, $3, $4)
+     ON CONFLICT (name) DO UPDATE SET
+       device=EXCLUDED.device, address=EXCLUDED.address, datatype=EXCLUDED.datatype`,
+    [name, b.device ?? null, b.address ?? null, b.datatype ?? null],
+  );
+  await refreshTagCache();
+  return reply.send({ ok: true });
+});
+
+// Import CSV de tags : lignes "tag,address[,datatype[,unit]]". Rattachés au device.
+app.post("/api/devices/:name/import", { preHandler: requireAdmin }, async (req, reply) => {
+  const { name } = req.params as { name: string };
+  const b = req.body as { csv?: string };
+  if (!b.csv) return reply.code(400).send({ error: "champ 'csv' requis" });
+  let imported = 0;
+  const errors: string[] = [];
+  for (const raw of b.csv.split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const [tag, address, datatype, unit] = line.split(",").map((s) => s?.trim());
+    if (!tag || !address) {
+      errors.push(`ligne ignorée: ${line}`);
+      continue;
+    }
+    await pool.query(
+      `INSERT INTO tags (name, label, device, address, datatype, unit)
+       VALUES ($1, $1, $2, $3, $4, $5)
+       ON CONFLICT (name) DO UPDATE SET
+         device=EXCLUDED.device, address=EXCLUDED.address,
+         datatype=COALESCE(EXCLUDED.datatype, tags.datatype),
+         unit=COALESCE(EXCLUDED.unit, tags.unit)`,
+      [tag, name, address, datatype || null, unit || null],
+    );
+    imported++;
+  }
+  await refreshTagCache();
+  await audit(req.user!.username, "device.import", name, { imported });
+  return { imported, errors };
+});
+
+// Déploie le connecteur PLC4X d'un device vers Kafka Connect (génère depuis la base).
+app.post("/api/devices/:name/deploy", { preHandler: requireAdmin }, async (req) => {
+  const { name } = req.params as { name: string };
+  const result = await deployDevice(pool, name);
+  await audit(req.user!.username, "device.deploy", name, result);
+  return result;
+});
+
+// Retire le connecteur d'un device de Kafka Connect.
+app.post("/api/devices/:name/undeploy", { preHandler: requireAdmin }, async (req) => {
+  const { name } = req.params as { name: string };
+  const result = await undeployDevice(name);
+  await audit(req.user!.username, "device.undeploy", name, result);
+  return result;
 });
 
 // ─── Administration des utilisateurs & droits (Phase 7, admin only) ────────

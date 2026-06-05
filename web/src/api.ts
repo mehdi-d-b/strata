@@ -190,3 +190,61 @@ export const sendCommand = (tag: string, value: number) =>
     method: "POST",
     body: JSON.stringify({ tag, value }),
   });
+
+// ─── Automates (devices) & adresses (gestion des tags) ─────────────────────
+
+export const PROTOCOLS = ["modbus-tcp", "s7", "eip", "simulated"] as const;
+export type Protocol = (typeof PROTOCOLS)[number];
+
+export type Device = {
+  name: string;
+  protocol: Protocol;
+  host: string;
+  options: string | null;
+  poll_ms: number;
+  enabled: boolean;
+  base_tag: string | null;
+  tag_count: number;
+};
+
+export type DeviceTag = {
+  name: string;
+  label: string | null;
+  unit: string | null;
+  address: string | null;
+  datatype: string | null;
+  enabled: boolean;
+};
+
+export type DeployResult = { device: string; ok: boolean; detail: string };
+
+export const fetchDevices = () => api<Device[]>("/api/devices");
+export const saveDevice = (d: Partial<Device>) =>
+  api("/api/devices", { method: "POST", body: JSON.stringify(d) });
+export const deleteDevice = (name: string) =>
+  api(`/api/devices/${encodeURIComponent(name)}`, { method: "DELETE" });
+export const fetchDeviceTags = (name: string) =>
+  api<DeviceTag[]>(`/api/devices/${encodeURIComponent(name)}/tags`);
+export const saveTagAddress = (
+  tag: string,
+  device: string | null,
+  address: string | null,
+  datatype: string | null,
+) =>
+  api(`/api/tags/${encodeURIComponent(tag)}/address`, {
+    method: "POST",
+    body: JSON.stringify({ device, address, datatype }),
+  });
+export const importTagsCsv = (device: string, csv: string) =>
+  api<{ imported: number; errors: string[] }>(
+    `/api/devices/${encodeURIComponent(device)}/import`,
+    { method: "POST", body: JSON.stringify({ csv }) },
+  );
+export const deployDevice = (name: string) =>
+  api<DeployResult>(`/api/devices/${encodeURIComponent(name)}/deploy`, {
+    method: "POST",
+  });
+export const undeployDevice = (name: string) =>
+  api<DeployResult>(`/api/devices/${encodeURIComponent(name)}/undeploy`, {
+    method: "POST",
+  });

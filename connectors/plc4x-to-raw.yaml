@@ -2,15 +2,14 @@
 #
 # PLC4X émet UN message par job, contenant TOUS ses tags groupés, avec les ALIAS
 # définis dans la config du connecteur (pas les adresses physiques) :
-#   key   = {"sourceName":"demo","jobName":"scan"}
-#   value = {"tags":{"temperature":123,"pression":456},"timestamp":1780568826389}
+#   key   = {"sourceName":"brasserie.ipa","jobName":"scan"}
+#   value = {"tags":{"fermenteur.temperature":123,...},"timestamp":1780568826389}
 #
 # Convention Strata (cf. CLAUDE.md) : le `tag` est un nom MÉTIER hiérarchique
-# `site.ligne.machine.mesure`, indépendant du protocole. On le compose donc en
-#   <base métier de la source> + "." + <alias du point>
-# La base métier est attachée à la source PLC4X via la table ci-dessous. C'est le
-# seul endroit qui traduit "automate physique" -> "emplacement métier" ; il pourra
-# migrer en base/UI plus tard sans toucher au reste.
+# `site.ligne.machine.mesure`, indépendant du protocole. Les connecteurs sont
+# GÉNÉRÉS depuis la base (table devices) : la `source` PLC4X est nommée d'après le
+# `base_tag` métier du device, et l'alias de chaque point est son nom RELATIF.
+# Le nom métier complet = sourceName + "." + alias. Aucune table codée en dur ici.
 
 input:
   kafka_franz:
@@ -21,19 +20,8 @@ input:
 pipeline:
   processors:
     - mapping: |
-        # Le sourceName PLC4X est dans la CLÉ Kafka : {"sourceName":"demo","jobName":"scan"}
-        let source_name = meta("kafka_key").parse_json().sourceName.or("")
-
-        # Mapping sourceName PLC4X (= nom de la source dans la config du connecteur)
-        # -> base métier hiérarchique. À enrichir quand on ajoute de vrais automates.
-        let source_base = {
-          "demo":      "usine1.ligne1",
-          "s7line":    "usine1.ligne1",
-          "modbusdev": "usine1.ligne2",
-          "ablogix":   "usine1.ligne3"
-        }
-        let base = $source_base.get($source_name).or("usine1.inconnu")
-
+        # sourceName PLC4X (= base_tag métier du device) dans la CLÉ Kafka.
+        let base = meta("kafka_key").parse_json().sourceName.or("usine.inconnu")
         let ts = this.timestamp
 
         # Éclate l'objet `tags` en un message par point, au contrat Strata.

@@ -77,10 +77,16 @@ services:
     depends_on:
       redpanda:
         condition: service_healthy
+    # Crée tags.raw / tags.cmd, et les topics internes de Kafka Connect (profil
+    # plc4x) en cleanup.policy=compact (sinon Connect refuse de démarrer).
     entrypoint: ["/bin/bash", "-c"]
     command:
-      - rpk topic create tags.raw --brokers redpanda:9092 -p 1 -r 1 || true;
-        rpk topic create tags.cmd --brokers redpanda:9092 -p 1 -r 1 || true
+      - >-
+        rpk topic create tags.raw --brokers redpanda:9092 -p 1 -r 1 || true;
+        rpk topic create tags.cmd --brokers redpanda:9092 -p 1 -r 1 || true;
+        rpk topic create _connect-configs --brokers redpanda:9092 -p 1 -r 1 -c cleanup.policy=compact || true;
+        rpk topic create _connect-offsets --brokers redpanda:9092 -p 1 -r 1 -c cleanup.policy=compact || true;
+        rpk topic create _connect-status --brokers redpanda:9092 -p 1 -r 1 -c cleanup.policy=compact || true
     restart: "no"
 
   mosquitto:
@@ -194,6 +200,8 @@ services:
       KAFKA_BROKERS: redpanda:9092
       PG_DSN: "postgres://${TIMESCALE_USER:-strata}:${TIMESCALE_PASSWORD:-strata}@timescaledb:5432/${TIMESCALE_DB:-strata}"
       PORT: "3001"
+      # API REST de Kafka Connect (profil plc4x) pour déployer les connecteurs générés.
+      KAFKA_CONNECT_URL: "http://kafka-connect:8083"
     ports:
       - "3001:3001"
     restart: unless-stopped

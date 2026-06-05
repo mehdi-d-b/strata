@@ -3,11 +3,12 @@ import { LiveView } from "./LiveView";
 import { TagsView } from "./TagsView";
 import { ProductionView } from "./ProductionView";
 import { AdminView } from "./AdminView";
+import { DevicesView } from "./DevicesView";
 import { LoginView } from "./LoginView";
 import { useAuth } from "./auth";
 import { userIsAdmin } from "./api";
 
-type Tab = "live" | "production" | "tags" | "admin";
+type Tab = "live" | "production" | "tags" | "devices" | "admin";
 
 export function App() {
   const { user, loading, logout } = useAuth();
@@ -50,6 +51,14 @@ export function App() {
           </button>
           {admin && (
             <button
+              className={tab === "devices" ? "active" : ""}
+              onClick={() => setTab("devices")}
+            >
+              Automates
+            </button>
+          )}
+          {admin && (
+            <button
               className={tab === "admin" ? "active" : ""}
               onClick={() => setTab("admin")}
             >
@@ -68,6 +77,7 @@ export function App() {
         {tab === "live" && <LiveView />}
         {tab === "production" && <ProductionView />}
         {tab === "tags" && <TagsView />}
+        {tab === "devices" && admin && <DevicesView />}
         {tab === "admin" && admin && <AdminView />}
       </main>
     </>

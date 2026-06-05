@@ -450,3 +450,40 @@ header .ghost {
 .cmdbox-msg.err {
   color: #f85149;
 }
+
+/* ─── Automates (gestion des tags) ─────────────────────────────── */
+.linkish {
+  background: transparent;
+  border: none;
+  color: #58a6ff;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0;
+  text-decoration: underline;
+}
+
+tr.row-selected {
+  background: #11202e;
+}
+
+.newrow select {
+  background: #0e1116;
+  color: #e6edf3;
+  border: 1px solid #2d3645;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
+textarea.csv {
+  width: 100%;
+  box-sizing: border-box;
+  background: #0e1116;
+  color: #e6edf3;
+  border: 1px solid #2d3645;
+  border-radius: 6px;
+  padding: 9px 11px;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  resize: vertical;
+}
