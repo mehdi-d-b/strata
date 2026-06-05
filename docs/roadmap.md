@@ -83,11 +83,21 @@ Architecture **cerveau / faces** conçue pour accueillir les vraies faces en P6 
 - [ ] *Reporté* : sécuriser le WebSocket temps réel (lecture non authentifiée pour l'instant)
 - [ ] *Reporté* : masquer/désactiver les boutons selon les droits (passe shadcn)
 
-## Phase 8 — Écriture vers les PLC (sink) ✍️
+## Phase 8 — Écriture vers les PLC (sink) ✍️ ⬅️ *fait*
 **But : envoyer des consignes aux automates, encadré par les droits P7.**
-- [ ] Connecteur `Plc4xSinkConnector` (déjà chargé dans Kafka Connect) : topic `tags.cmd` → PLC
-- [ ] Vérif des droits (P7) avant toute écriture + entrée d'audit
-- [ ] UI d'écriture de consigne (réservée aux utilisateurs autorisés)
+- [x] Gateway : POST `/api/command` (requireAuth + `can(write,tag)` + audit) → topic `tags.cmd`
+- [x] Simulateur : face de commande (consume `tags.cmd`) → applique au cerveau (réaction visible)
+- [x] Front : widget d'écriture de consigne (visible selon le droit write sur le tag)
+- [x] Template `Plc4xSinkConnector` commenté (prêt pour le réel, non calibré)
+
+## Phase 8.5 — Gestion des tags & automates ⬅️ *fait* (née des questions terrain)
+**But : Strata = source de vérité de la config d'acquisition (plus de JSON à la main).**
+- [x] Modèle `devices` (automate : protocole/host/base_tag) + `address`/`datatype` sur les tags
+- [x] Génération des connecteurs PLC4X **depuis la base** + déploiement via l'API Kafka Connect
+- [x] Un connecteur par automate (sourceName = base_tag) → 2 automates de protocoles différents
+      sur une même ligne fonctionnent (ex : fermenteur Modbus + embouteilleuse S7)
+- [x] UI onglet « Automates » : CRUD, adresses, import CSV, Déployer/Retirer
+- [x] Persistance : relancer Strata recharge tout depuis la base
 
 ## Phase 9 — Plus si affinité
 - [ ] RisingWave : streams dérivés temps réel, alarmes
