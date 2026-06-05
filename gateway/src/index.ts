@@ -193,6 +193,125 @@ app.get("/api/auth/me", async (req) => {
   return req.user ?? null;
 });
 
+// Changer SON PROPRE mot de passe (tout utilisateur connecté).
+app.post("/api/auth/password", { preHandler: requireAuth }, async (req, reply) => {
+  const b = req.body as { current?: string; next?: string };
+  if (!b.current || !b.next || b.next.length < 4)
+    return reply.code(400).send({ error: "mot de passe actuel et nouveau (≥4) requis" });
+  const { rows } = await pool.query("SELECT password_hash FROM users WHERE id = $1", [
+    req.user!.id,
+  ]);
+  if (rows.length === 0 || !(await verifyPassword(b.current, rows[0].password_hash)))
+    return reply.code(403).send({ error: "mot de passe actuel incorrect" });
+  await pool.query("UPDATE users SET password_hash = $1 WHERE id = $2", [
+    await hashPassword(b.next),
+    req.user!.id,
+  ]);
+  await audit(req.user!.username, "self.password");
+  return { ok: true };
+});
+
+// ─── Paramètres : Stockage (Timescale) — admin only ───────────────────────
+// Garde-fou : aucun SQL arbitraire. On lit l'état et on (re)pose des policies
+// bornées via les fonctions Timescale.
+
+// État du stockage : taille de l'hypertable, compression, policies actives.
+app.get("/api/storage", { preHandler: requireAdmin }, async () => {
+  const size = await pool.query(
+    `SELECT
+       pg_size_pretty(hypertable_size('mesures')) AS total,
+       (SELECT count(*) FROM mesures)::bigint AS rows`,
+  );
+  // Détail compression (avant/après) si disponible.
+  const comp = await pool.query(
+    `SELECT
+       pg_size_pretty(sum(before_compression_total_bytes))  AS before,
+       pg_size_pretty(sum(after_compression_total_bytes))   AS after,
+       sum(before_compression_total_bytes)::bigint          AS before_b,
+       sum(after_compression_total_bytes)::bigint           AS after_b
+     FROM chunk_compression_stats('mesures')`,
+  );
+  const policies = await pool.query(
+    `SELECT proc_name, config FROM timescaledb_information.jobs
+     WHERE hypertable_name = 'mesures' AND proc_name LIKE 'policy_%'`,
+  );
+  const pol: Record<string, unknown> = {};
+  for (const r of policies.rows) {
+    if (r.proc_name === "policy_retention") pol.retention = r.config?.drop_after;
+    if (r.proc_name === "policy_compression") pol.compression = r.config?.compress_after;
+  }
+  return {
+    size: size.rows[0],
+    compression: comp.rows[0],
+    retention_after: pol.retention ?? null,
+    compress_after: pol.compression ?? null,
+  };
+});
+
+// Met à jour la rétention (jours). 0 = désactive la purge.
+app.post("/api/storage/retention", { preHandler: requireAdmin }, async (req, reply) => {
+  const b = req.body as { days?: number };
+  const days = Number(b.days);
+  if (!Number.isFinite(days) || days < 0 || days > 3650)
+    return reply.code(400).send({ error: "days doit être entre 0 et 3650" });
+  await pool.query("SELECT remove_retention_policy('mesures', if_exists => true)");
+  if (days > 0) {
+    await pool.query("SELECT add_retention_policy('mesures', ($1 || ' days')::interval)", [
+      days,
+    ]);
+  }
+  await audit(req.user!.username, "storage.retention", null, { days });
+  return { ok: true, days };
+});
+
+// Met à jour la compression (jours avant compression). 0 = désactive.
+app.post("/api/storage/compression", { preHandler: requireAdmin }, async (req, reply) => {
+  const b = req.body as { days?: number };
+  const days = Number(b.days);
+  if (!Number.isFinite(days) || days < 0 || days > 3650)
+    return reply.code(400).send({ error: "days doit être entre 0 et 3650" });
+  await pool.query("SELECT remove_compression_policy('mesures', if_exists => true)");
+  if (days > 0) {
+    await pool.query("SELECT add_compression_policy('mesures', ($1 || ' days')::interval)", [
+      days,
+    ]);
+  }
+  await audit(req.user!.username, "storage.compression", null, { days });
+  return { ok: true, days };
+});
+
+// ─── Paramètres : Infos système (admin only) ──────────────────────────────
+app.get("/api/system", { preHandler: requireAdmin }, async () => {
+  const counts = await pool.query(
+    `SELECT
+       (SELECT count(*) FROM tags)::int     AS tags,
+       (SELECT count(*) FROM devices)::int   AS devices,
+       (SELECT count(*) FROM users)::int     AS users,
+       (SELECT count(*) FROM mesures)::bigint AS mesures`,
+  );
+  const ver = await pool.query("SELECT extversion FROM pg_extension WHERE extname='timescaledb'");
+  // État des connecteurs Kafka Connect (si le profil plc4x tourne).
+  let connectors: { name: string; state: string }[] = [];
+  try {
+    const r = await fetch(`${process.env.KAFKA_CONNECT_URL ?? "http://kafka-connect:8083"}/connectors?expand=status`);
+    if (r.ok) {
+      const data = (await r.json()) as Record<string, { status?: { connector?: { state?: string } } }>;
+      connectors = Object.entries(data).map(([name, v]) => ({
+        name,
+        state: v.status?.connector?.state ?? "?",
+      }));
+    }
+  } catch {
+    /* Kafka Connect non démarré : pas de connecteurs à lister */
+  }
+  return {
+    counts: counts.rows[0],
+    timescaledb_version: ver.rows[0]?.extversion ?? "?",
+    node_version: process.version,
+    connectors,
+  };
+});
+
 // ─── Écriture de consigne (Phase 8) ───────────────────────────────────────
 // Publie une commande sur `tags.cmd`, après vérif du droit d'écriture + audit.
 app.post("/api/command", { preHandler: requireAuth }, async (req, reply) => {

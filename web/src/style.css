@@ -203,6 +203,39 @@ main {
   padding: 0 4px;
 }
 
+/* ─── Paramètres : formulaires ─────────────────────────────────── */
+.form-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 360px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+  color: #8b97a7;
+}
+
+.field input,
+.field select {
+  background: #0e1116;
+  color: #e6edf3;
+  border: 1px solid #2d3645;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+
+.ok-text {
+  color: #3fb950;
+}
+.err-text {
+  color: #f85149;
+}
+
 /* ─── Accueil : KPIs ───────────────────────────────────────────── */
 .kpi-grid {
   display: grid;

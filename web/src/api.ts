@@ -248,3 +248,33 @@ export const undeployDevice = (name: string) =>
   api<DeployResult>(`/api/devices/${encodeURIComponent(name)}/undeploy`, {
     method: "POST",
   });
+
+// ─── Paramètres ────────────────────────────────────────────────────────────
+
+export const changeMyPassword = (current: string, next: string) =>
+  api("/api/auth/password", {
+    method: "POST",
+    body: JSON.stringify({ current, next }),
+  });
+
+export type Storage = {
+  size: { total: string; rows: string };
+  compression: { before: string | null; after: string | null; before_b: string | null; after_b: string | null };
+  retention_after: string | null;
+  compress_after: string | null;
+};
+
+export const fetchStorage = () => api<Storage>("/api/storage");
+export const setRetention = (days: number) =>
+  api("/api/storage/retention", { method: "POST", body: JSON.stringify({ days }) });
+export const setCompression = (days: number) =>
+  api("/api/storage/compression", { method: "POST", body: JSON.stringify({ days }) });
+
+export type SystemInfo = {
+  counts: { tags: number; devices: number; users: number; mesures: string };
+  timescaledb_version: string;
+  node_version: string;
+  connectors: { name: string; state: string }[];
+};
+
+export const fetchSystem = () => api<SystemInfo>("/api/system");

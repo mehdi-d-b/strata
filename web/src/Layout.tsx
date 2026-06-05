@@ -41,6 +41,9 @@ export function Layout() {
               Admin
             </NavLink>
           )}
+          <NavLink to="/settings" className={navClass}>
+            Paramètres
+          </NavLink>
         </nav>
         <div className="user-box">
           <span className="user-name">{user?.display_name ?? user?.username}</span>

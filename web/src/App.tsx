@@ -6,6 +6,7 @@ import { TagsView } from "./TagsView";
 import { ProductionView } from "./ProductionView";
 import { AdminView } from "./AdminView";
 import { DevicesView } from "./DevicesView";
+import { SettingsView } from "./SettingsView";
 import { LoginView } from "./LoginView";
 import { RequireAdmin } from "./RequireAdmin";
 import { useAuth } from "./auth";
@@ -28,6 +29,7 @@ export function App() {
           <Route path="live" element={<LiveView />} />
           <Route path="production" element={<ProductionView />} />
           <Route path="tags" element={<TagsView />} />
+          <Route path="settings" element={<SettingsView />} />
           <Route
             path="devices"
             element={
