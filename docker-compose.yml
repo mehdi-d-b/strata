@@ -200,6 +200,9 @@ services:
       KAFKA_BROKERS: redpanda:9092
       PG_DSN: "postgres://${TIMESCALE_USER:-strata}:${TIMESCALE_PASSWORD:-strata}@timescaledb:5432/${TIMESCALE_DB:-strata}"
       PORT: "3001"
+      # Mot de passe du compte admin créé au 1er boot (cf. .env). À changer en prod.
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      KAFKAJS_NO_PARTITIONER_WARNING: "1"
       # API REST de Kafka Connect (profil plc4x) pour déployer les connecteurs générés.
       KAFKA_CONNECT_URL: "http://kafka-connect:8083"
     ports:

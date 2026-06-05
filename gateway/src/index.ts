@@ -652,9 +652,16 @@ async function seedAdmin() {
   await pool.query("INSERT INTO user_roles (user_id, role) VALUES ($1,'admin')", [
     ins.rows[0].id,
   ]);
-  app.log.warn(
-    `[auth] compte 'admin' créé (mot de passe par défaut: '${password}') — à changer !`,
-  );
+  // On ne logue JAMAIS le mot de passe. On alerte fort seulement si le défaut
+  // (non sécurisé) est utilisé, sinon une simple info.
+  if (password === "admin") {
+    app.log.warn(
+      "[auth] compte 'admin' créé avec le MOT DE PASSE PAR DÉFAUT 'admin' — " +
+        "définir ADMIN_PASSWORD (.env) et/ou le changer au 1er login !",
+    );
+  } else {
+    app.log.info("[auth] compte 'admin' créé (mot de passe depuis ADMIN_PASSWORD).");
+  }
 }
 
 // --- Démarrage -------------------------------------------------------------
