@@ -79,7 +79,8 @@ services:
         condition: service_healthy
     entrypoint: ["/bin/bash", "-c"]
     command:
-      - rpk topic create tags.raw --brokers redpanda:9092 -p 1 -r 1 || true
+      - rpk topic create tags.raw --brokers redpanda:9092 -p 1 -r 1 || true;
+        rpk topic create tags.cmd --brokers redpanda:9092 -p 1 -r 1 || true
     restart: "no"
 
   mosquitto:
@@ -94,10 +95,14 @@ services:
     build: ./simulator
     container_name: strata-simulator
     depends_on:
-      - mosquitto
+      mosquitto:
+        condition: service_started
+      redpanda:
+        condition: service_healthy
     environment:
       MQTT_URL: mosquitto
       MQTT_PORT: "1883"
+      KAFKA_BROKERS: redpanda:9092
       TICK_HZ: "2.0"
       SPEED: "1.0"
     restart: unless-stopped

@@ -183,3 +183,10 @@ export const setRoleGrants = (name: string, grants: Grant[]) =>
   api(`/api/roles/${name}/grants`, { method: "PUT", body: JSON.stringify({ grants }) });
 
 export const fetchAudit = (limit = 100) => api<AuditRow[]>(`/api/audit?limit=${limit}`);
+
+/** Écrit une consigne (Phase 8). Le backend vérifie le droit write sur le tag. */
+export const sendCommand = (tag: string, value: number) =>
+  api<{ ok: boolean }>("/api/command", {
+    method: "POST",
+    body: JSON.stringify({ tag, value }),
+  });

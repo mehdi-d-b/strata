@@ -72,6 +72,22 @@ curl -s -X PUT http://localhost:8083/connectors/plc4x-siemens/config \
   -d "$(python3 -c "import json;print(json.dumps(json.load(open('connectors/plc4x/10-siemens-s7.json'))['config']))")"
 ```
 
+## Écriture vers les automates (sink, Phase 8)
+
+`20-sink-siemens-s7.json` est un **template** de connecteur *sink* : il consomme le
+topic `tags.cmd` (consignes publiées par la gateway après vérif des droits) et les
+écrit dans un automate.
+
+> ⚠️ Contrairement au connecteur **source** (testé et fonctionnel via `simulated://`),
+> ce sink est un **template non calibré** : le mapping « tag métier → adresse physique »
+> et le format exact dépendent du matériel et de la version du connecteur. À finaliser
+> le jour où un vrai automate est disponible (interroger
+> `/connector-plugins/Plc4xSinkConnector/config/validate` pour le schéma exact).
+
+En attendant, la boucle d'écriture est **pleinement démontrable via le simulateur** :
+la gateway publie sur `tags.cmd`, et la *face de commande* du simulateur applique la
+consigne au cerveau (ex : changer la température cible d'une cuve → visible sur la courbe).
+
 ## Passer au matériel réel
 
 Dans le JSON du connecteur :

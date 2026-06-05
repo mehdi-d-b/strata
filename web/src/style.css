@@ -399,3 +399,54 @@ header .ghost {
   padding: 7px 10px;
   font-size: 13px;
 }
+
+/* ─── Écriture de consigne (Phase 8) ───────────────────────────── */
+.cmdbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #1d242e;
+  font-size: 13px;
+}
+
+.cmdbox-label {
+  color: #8b97a7;
+}
+
+.cmdbox input {
+  background: #0e1116;
+  color: #e6edf3;
+  border: 1px solid #2d3645;
+  border-radius: 6px;
+  padding: 7px 10px;
+  width: 120px;
+  font-size: 13px;
+}
+
+.cmdbox-unit {
+  color: #8b97a7;
+}
+
+.cmdbox button {
+  background: #8957e5;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cmdbox button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.cmdbox-msg.ok {
+  color: #3fb950;
+}
+.cmdbox-msg.err {
+  color: #f85149;
+}

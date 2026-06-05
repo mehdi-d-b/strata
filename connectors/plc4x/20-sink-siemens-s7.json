@@ -1,0 +1,17 @@
+{
+  "_README": "SINK PLC4X : écrit les consignes du topic `tags.cmd` vers un automate (ici Siemens S7). C'est le pendant 'écriture' du connecteur source. Par défaut désactivé/simulé : un sink simulated:// accepte les écritures sans automate. Pour du réel : connectionString s7://<IP> + mapper chaque tag métier vers son adresse physique. Déployer : curl -X POST localhost:8083/connectors -H 'content-type: application/json' -d @connectors/plc4x/20-sink-siemens-s7.json",
+
+  "name": "plc4x-sink-siemens",
+  "config": {
+    "connector.class": "org.apache.plc4x.kafka.Plc4xSinkConnector",
+    "tasks.max": "1",
+
+    "_comment_topics": "Topic Kafka des consignes à écrire.",
+    "topics": "tags.cmd",
+
+    "_comment_sink": "RÉEL : 's7://192.168.0.10'. Le driver simulated:// accepte les écritures (sans effet visible) -> utile pour valider le câblage sans matériel.",
+    "connectionString": "simulated://127.0.0.1",
+
+    "_comment_mapping": "PLC4X sink doit savoir À QUELLE ADRESSE écrire chaque message. Le mapping tag métier -> adresse physique dépend de la version du connecteur ; en S7 réel les adresses ressemblent à %DB1.DBD0:DINT. À calibrer avec le matériel (cf. /connector-plugins/Plc4xSinkConnector/config/validate pour le schéma exact)."
+  }
+}

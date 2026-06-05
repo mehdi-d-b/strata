@@ -223,6 +223,38 @@ class Brewery:
     def find_recipe(self, name: str) -> Recipe | None:
         return next((r for r in self.recipes if r.name == name), None)
 
+    def apply_command(self, tag: str, value: float) -> bool:
+        """Applique une consigne reçue (topic tags.cmd) à l'usine.
+
+        Tags pilotables :
+          <site>.<recette>.<cuve>.temp_cible  -> change la température cible de la cuve
+          <site>.<recette>.<machine>.state    -> 0=stop, 1=run (cuve ou embouteilleuse)
+        Renvoie True si la commande a été comprise et appliquée.
+        """
+        parts = tag.split(".")
+        if len(parts) < 4 or parts[0] != self.site:
+            return False
+        _, recipe_name, machine, field = parts[0], parts[1], parts[2], parts[3]
+        recipe = self.find_recipe(recipe_name)
+        if not recipe:
+            return False
+
+        if field == "temp_cible":
+            v = self.find_vessel(recipe_name, machine)
+            if v:
+                v.target_temp = float(value)
+                return True
+        elif field == "state":
+            run = value >= 1
+            target = self.find_vessel(recipe_name, machine)
+            obj = target if target else (
+                recipe.bottler if recipe.bottler.name == machine else None
+            )
+            if obj:
+                obj.start() if run else obj.stop()
+                return True
+        return False
+
     def tick(self, dt: float) -> None:
         self._t += dt
         for r in self.recipes:

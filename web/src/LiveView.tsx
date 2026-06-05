@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RealtimeChart } from "./RealtimeChart";
+import { CommandBox } from "./CommandBox";
 import { fetchHistory, fetchTags, tagLabel, type Mesure, type Tag } from "./api";
 
 const MAX_POINTS = 600; // ~10 min à 1 pt/s
@@ -120,6 +121,7 @@ export function LiveView() {
 
       <div className="card">
         <RealtimeChart data={data} label={chartLabel} />
+        {selected && <CommandBox tag={selected} unit={unit} />}
       </div>
     </>
   );

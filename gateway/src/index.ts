@@ -38,6 +38,33 @@ const PORT = Number(process.env.PORT ?? 3001);
 // --- Postgres --------------------------------------------------------------
 const pool = new pg.Pool({ connectionString: PG_DSN });
 
+// --- Kafka/Redpanda : un client partagé (consumer fan-out + producer commandes) ---
+const kafka = new Kafka({
+  clientId: "strata-gateway",
+  brokers: KAFKA_BROKERS,
+  logLevel: logLevel.WARN,
+});
+
+// Producer pour publier les consignes d'écriture sur le topic `tags.cmd`.
+// Connecté paresseusement à la première commande.
+const producer = kafka.producer();
+let producerReady = false;
+async function publishCommand(tag: string, value: number, source: string) {
+  if (!producerReady) {
+    await producer.connect();
+    producerReady = true;
+  }
+  await producer.send({
+    topic: "tags.cmd",
+    messages: [
+      {
+        key: tag,
+        value: JSON.stringify({ tag, value, ts: new Date().toISOString(), source }),
+      },
+    ],
+  });
+}
+
 type TagConfig = {
   name: string;
   label: string | null;
@@ -163,6 +190,24 @@ app.post("/api/auth/logout", async (req, reply) => {
 // Qui suis-je ? (le front l'appelle au chargement pour connaître l'état de session)
 app.get("/api/auth/me", async (req) => {
   return req.user ?? null;
+});
+
+// ─── Écriture de consigne (Phase 8) ───────────────────────────────────────
+// Publie une commande sur `tags.cmd`, après vérif du droit d'écriture + audit.
+app.post("/api/command", { preHandler: requireAuth }, async (req, reply) => {
+  const b = req.body as { tag?: string; value?: number };
+  if (!b.tag || typeof b.value !== "number")
+    return reply.code(400).send({ error: "tag (string) et value (number) requis" });
+  if (!can(req.user, "write", b.tag))
+    return reply.code(403).send({ error: `pas le droit d'écrire sur ${b.tag}` });
+  try {
+    await publishCommand(b.tag, b.value, `user:${req.user!.username}`);
+  } catch (err) {
+    app.log.error(`publication commande échouée: ${(err as Error).message}`);
+    return reply.code(502).send({ error: "broker indisponible" });
+  }
+  await audit(req.user!.username, "tag.command", b.tag, { value: b.value });
+  return { ok: true, tag: b.tag, value: b.value };
 });
 
 // Liste des tags configurés (avec métadonnées).
@@ -438,12 +483,6 @@ app.register(async (f) => {
 });
 
 // --- Consumer Redpanda : fan-out vers les WS (scaling appliqué) ------------
-const kafka = new Kafka({
-  clientId: "strata-gateway",
-  brokers: KAFKA_BROKERS,
-  logLevel: logLevel.WARN,
-});
-
 async function startConsumer() {
   const consumer = kafka.consumer({ groupId: "strata-gateway-ws" });
 
