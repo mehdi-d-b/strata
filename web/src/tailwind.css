@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+/* Active la variante `dark:` via la classe .dark sur <html> (on est en sombre). */
+@custom-variant dark (&:is(.dark *));
+
+/* Variables de thème pour shadcn/ui, calées sur le thème sombre de Strata
+   (#0e1116 fond, #11161d cartes, #3fb950 vert accent…). */
+@theme {
+  --color-background: #0e1116;
+  --color-foreground: #e6edf3;
+  --color-card: #11161d;
+  --color-card-foreground: #e6edf3;
+  --color-popover: #161b22;
+  --color-popover-foreground: #e6edf3;
+  --color-primary: #3fb950;
+  --color-primary-foreground: #04140a;
+  --color-secondary: #161b22;
+  --color-secondary-foreground: #e6edf3;
+  --color-muted: #161b22;
+  --color-muted-foreground: #8b97a7;
+  --color-accent: #11202e;
+  --color-accent-foreground: #e6edf3;
+  --color-destructive: #f85149;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #2d3645;
+  --color-input: #2d3645;
+  --color-ring: #3fb950;
+  --radius: 0.5rem;
+}

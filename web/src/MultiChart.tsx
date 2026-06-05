@@ -44,7 +44,12 @@ export function MultiChart({ data, series, height = 420 }: Props) {
 
   useEffect(() => {
     if (!ref.current) return;
-    const key = structureKey(series);
+    // La clé inclut "y a-t-il des données ?" : un plot créé VIDE ne réveille pas
+    // l'auto-range au premier setData (symptôme : 1 série n'apparaît qu'après un
+    // changement d'axe, qui recrée le plot). On force donc une recréation au
+    // passage vide -> non-vide.
+    const hasData = ((data[0] as number[] | undefined)?.length ?? 0) > 0;
+    const key = structureKey(series) + (hasData ? "#data" : "#empty");
     if (plot.current && key === lastKey.current) return; // structure inchangée
     lastKey.current = key;
     plot.current?.destroy();
@@ -78,10 +83,16 @@ export function MultiChart({ data, series, height = 420 }: Props) {
       });
     }
 
+    // Ne déclarer que les scales réellement utilisées : une scale `right`
+    // déclarée sans série dessus empêche uPlot de bien initialiser le rendu
+    // (symptôme : rien ne s'affiche tant qu'on n'a pas 2 séries dont une à droite).
+    const scales: uPlot.Scales = { x: { time: true }, left: { auto: true } };
+    if (hasRight) scales.right = { auto: true };
+
     const opts: uPlot.Options = {
       width: ref.current.clientWidth,
       height,
-      scales: { x: { time: true }, left: { auto: true }, right: { auto: true } },
+      scales,
       legend: { show: true, live: true },
       cursor: { focus: { prox: 16 } },
       series: uSeries,
@@ -95,7 +106,7 @@ export function MultiChart({ data, series, height = 420 }: Props) {
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [series, height]);
+  }, [series, height, data]);
 
   // Mise à jour des données sans recréer le plot (toujours bien dimensionnée).
   useEffect(() => {

@@ -6,9 +6,9 @@ import { CommandBox } from "./CommandBox";
 import { fetchHistory, fetchTags, tagLabel, type Tag } from "./api";
 
 const WINDOWS = [
-  { label: "1 min", sec: 60 },
   { label: "5 min", sec: 300 },
   { label: "15 min", sec: 900 },
+  { label: "60 min", sec: 3600 },
 ];
 
 // Palette pour distinguer les courbes.
@@ -55,9 +55,19 @@ export function LiveView() {
     onLive: setLive,
   });
 
-  // Pour seed() stable dans les callbacks.
+  // Pour des callbacks stables (sans recréer la socket).
   const seedRef = useRef(seed);
   seedRef.current = seed;
+
+  // Amorce/recharge le buffer d'un tag avec l'historique couvrant la fenêtre.
+  const loadHistory = (tag: string, sec: number) =>
+    fetchHistory(tag, Math.ceil(sec / 60)).then((rows) => {
+      seedRef.current(
+        tag,
+        rows.map((r) => new Date(r.ts).getTime() / 1000),
+        rows.map((r) => Number(r.value)),
+      );
+    });
 
   // 3) (Dé)sélection d'un tag : amorce l'historique au moment où on l'ajoute.
   const toggleTag = (t: Tag) => {
@@ -68,20 +78,21 @@ export function LiveView() {
         return cur.filter((s) => s.tag !== t.name);
       }
       const color = PALETTE[cur.length % PALETTE.length];
-      // Amorce avec l'historique récent (en secondes).
-      fetchHistory(t.name, Math.ceil(windowSec / 60) || 5).then((rows) => {
-        seedRef.current(
-          t.name,
-          rows.map((r) => new Date(r.ts).getTime() / 1000),
-          rows.map((r) => Number(r.value)),
-        );
-      });
+      loadHistory(t.name, windowSec);
       return [
         ...cur,
         { tag: t.name, label: tagLabel(t), color, axis: "left", unit: t.unit },
       ];
     });
   };
+
+  // 4) Au changement de fenêtre : recharge l'historique de toutes les séries
+  //    affichées (sinon agrandir la fenêtre ne montre rien de plus, le brut
+  //    au-delà ayant été purgé du buffer).
+  useEffect(() => {
+    for (const s of selected) loadHistory(s.tag, windowSec);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [windowSec]);
 
   const setAxis = (tag: string, axis: "left" | "right") =>
     setSelected((cur) => cur.map((s) => (s.tag === tag ? { ...s, axis } : s)));

@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "./auth";
 import { userIsAdmin } from "./api";
+import { Button } from "@/components/ui/button";
 
 /** Coquille de l'application : en-tête + navigation + zone de contenu (Outlet). */
 export function Layout() {
@@ -43,9 +44,9 @@ export function Layout() {
         </nav>
         <div className="user-box">
           <span className="user-name">{user?.display_name ?? user?.username}</span>
-          <button className="ghost" onClick={() => logout()}>
+          <Button variant="outline" size="sm" onClick={() => logout()}>
             Déconnexion
-          </button>
+          </Button>
         </div>
       </header>
       <main>
