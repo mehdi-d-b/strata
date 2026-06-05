@@ -109,13 +109,10 @@ Architecture **cerveau / faces** conçue pour accueillir les vraies faces en P6 
 Choix assumés de la phase démo : rien de bloquant en local, mais à traiter avant un vrai
 déploiement. Aucune ne presse pour une démo.
 
-### 🔴 Rétention / compression TimescaleDB (la seule qui casse seule avec le temps)
-- `mesures` grossit **indéfiniment** : aucune politique de rétention ni de compression.
-- À activer : politique de **compression** des vieux chunks (gain typique 10–20×, restent
-  interrogeables) + politique de **rétention** (purge du brut au-delà de N jours).
-- Cohérence avec les **continuous aggregates** : garder les agrégats (prod/shift) longtemps,
-  purger le brut plus tôt. Demande une **décision métier** sur les durées.
-- *Idée produit* : exposer ces réglages dans l'UI (onglet « Stockage ») — voir ci-dessous.
+### ✅ Rétention / compression TimescaleDB — *fait*
+- Compression des chunks de +7j (`segmentby=tag`) + rétention du brut à 365j
+  (`infra/timescale/init/06-retention.sql`). Les continuous aggregates (prod/shift) survivent.
+- *Idée produit restante* : exposer ces réglages dans l'UI (onglet « Stockage ») — voir ci-dessous.
 
 ### 🟠 WebSocket temps réel non authentifié
 - `/ws` (gateway) est **ouvert** : le flux live contourne l'auth ET le RBAC (un opérateur
