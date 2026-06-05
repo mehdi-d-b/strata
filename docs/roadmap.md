@@ -112,7 +112,9 @@ déploiement. Aucune ne presse pour une démo.
 ### ✅ Rétention / compression TimescaleDB — *fait*
 - Compression des chunks de +7j (`segmentby=tag`) + rétention du brut à 365j
   (`infra/timescale/init/06-retention.sql`). Les continuous aggregates (prod/shift) survivent.
-- *Idée produit restante* : exposer ces réglages dans l'UI (onglet « Stockage ») — voir ci-dessous.
+- ✅ Pilotage depuis l'UI : onglet **Paramètres › Stockage** (état + réglages bornés rétention/
+  compression). Onglet Paramètres ajoute aussi : changer son mot de passe, préférences
+  d'affichage, infos système (versions, inventaire, état connecteurs).
 
 ### 🟠 WebSocket temps réel non authentifié
 - `/ws` (gateway) est **ouvert** : le flux live contourne l'auth ET le RBAC (un opérateur
