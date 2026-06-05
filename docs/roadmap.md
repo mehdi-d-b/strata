@@ -105,10 +105,38 @@ Architecture **cerveau / faces** conçue pour accueillir les vraies faces en P6 
 - [ ] IA / détection d'anomalies
 - [ ] OEE complet (dispo × perf × qualité)
 
+## Dette technique & durcissement « prod »
+Choix assumés de la phase démo : rien de bloquant en local, mais à traiter avant un vrai
+déploiement. Aucune ne presse pour une démo.
+
+### 🔴 Rétention / compression TimescaleDB (la seule qui casse seule avec le temps)
+- `mesures` grossit **indéfiniment** : aucune politique de rétention ni de compression.
+- À activer : politique de **compression** des vieux chunks (gain typique 10–20×, restent
+  interrogeables) + politique de **rétention** (purge du brut au-delà de N jours).
+- Cohérence avec les **continuous aggregates** : garder les agrégats (prod/shift) longtemps,
+  purger le brut plus tôt. Demande une **décision métier** sur les durées.
+- *Idée produit* : exposer ces réglages dans l'UI (onglet « Stockage ») — voir ci-dessous.
+
+### 🟠 WebSocket temps réel non authentifié
+- `/ws` (gateway) est **ouvert** : le flux live contourne l'auth ET le RBAC (un opérateur
+  limité à une ligne voit tout le temps réel). Cause : le WS se connecte direct sur `:3001`,
+  hors du chemin cookie des `fetch`.
+- À faire : valider la session à l'ouverture du WS + **filtrer** les tags poussés selon les
+  droits de lecture de l'utilisateur (le filtrage est une feature en soi).
+
+### 🟠 Secrets en clair dans le compose
+- Mot de passe Timescale en dur + `ADMIN_PASSWORD` défaut `admin`, versionnés dans Git.
+- À faire : externaliser dans `.env` (déjà gitignored), forcer le changement du mot de passe
+  admin au 1er login, documenter. Hygiène à régler **avant toute exposition**.
+
+### Idée — Gestion de TimescaleDB depuis l'UI (onglet « Stockage », admin)
+Régler depuis l'appli : durée de rétention du brut, activation/seuil de compression,
+visualisation de la taille des hypertables et du gain de compression. **Garde-fou** : ne PAS
+exposer du SQL arbitraire — un petit ensemble de réglages validés (durées, on/off) qui
+appellent les fonctions Timescale en backend. Pratique ET vendeur en démo (« l'admin gère sa
+rétention sans toucher au SQL »).
+
 ## Transverse (au fil de l'eau)
 - Observabilité : Redpanda Console (P0) + Grafana plus tard
-- **Rétention/compression Timescale** : `mesures` grossit indéfiniment aujourd'hui — ajouter
-  une politique de rétention + compression avant tout usage « prod »
 - Packaging : Compose (P0) ; installeur natif par OS = polish très tardif, non prioritaire
 - CI légère quand le code grossit
-- Sécurité : secrets en clair dans le compose (mots de passe) — externaliser avant prod
