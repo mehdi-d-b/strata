@@ -1,57 +1,94 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { fetchTags, type Tag } from "./api";
+import {
+  fetchDevices,
+  fetchProduction,
+  fetchTags,
+  userIsAdmin,
+  type Device,
+  type ProductionRow,
+  type Tag,
+} from "./api";
 import { useAuth } from "./auth";
-import { userIsAdmin } from "./api";
 
-/** Page d'accueil : vue d'ensemble + raccourcis (sera enrichie au polish). */
+/** Page d'accueil : tableau de bord (KPIs + raccourcis), style maison cohérent. */
 export function HomeView() {
   const { user } = useAuth();
+  const admin = userIsAdmin(user);
+
   const [tags, setTags] = useState<Tag[]>([]);
+  const [prod, setProd] = useState<ProductionRow[]>([]);
+  const [devices, setDevices] = useState<Device[]>([]);
 
   useEffect(() => {
     fetchTags().then(setTags).catch(() => setTags([]));
-  }, []);
+    fetchProduction(1).then(setProd).catch(() => setProd([]));
+    if (admin) fetchDevices().then(setDevices).catch(() => setDevices([]));
+  }, [admin]);
 
   const enabled = tags.filter((t) => t.enabled).length;
-  const admin = userIsAdmin(user);
+  const today = prod[0]?.day;
+  const todayRows = prod.filter((r) => r.day === today);
+  const ok = todayRows.reduce((s, r) => s + (r.ok ?? 0), 0);
+  const scrap = todayRows.reduce((s, r) => s + (r.scrap ?? 0), 0);
+  const scrapRate = ok + scrap ? ((scrap / (ok + scrap)) * 100).toFixed(1) : "—";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <div className="card">
-        <h2 className="card-title">Bienvenue, {user?.display_name ?? user?.username}</h2>
-        <p className="hint">
-          Strata — plateforme de streaming de données industrielles. Choisis une
-          section ci-dessous ou dans le menu.
-        </p>
+      <div>
+        <h2 className="card-title">Bonjour, {user?.display_name ?? user?.username}</h2>
+        <p className="hint">Vue d'ensemble de la plateforme.</p>
       </div>
 
+      {/* KPIs */}
+      <div className="kpi-grid">
+        <Kpi label="Tags actifs" value={enabled} hint={`${tags.length} au total`} />
+        <Kpi label="Bonnes (aujourd'hui)" value={ok} hint="toutes lignes" tone="green" />
+        <Kpi label="Taux de rebut" value={`${scrapRate}%`} hint="aujourd'hui" tone="amber" />
+        {admin && <Kpi label="Automates" value={devices.length} hint="sources" />}
+      </div>
+
+      {/* Raccourcis */}
       <div className="home-grid">
-        <Link to="/live" className="home-card">
-          <div className="home-card-title">Temps réel</div>
-          <div className="home-card-sub">Courbes en direct des {enabled} tags actifs</div>
-        </Link>
-        <Link to="/production" className="home-card">
-          <div className="home-card-title">Production</div>
-          <div className="home-card-sub">Tableau par shift, qualité, rebut</div>
-        </Link>
-        <Link to="/tags" className="home-card">
-          <div className="home-card-title">Tags</div>
-          <div className="home-card-sub">Configuration, unités, échelle</div>
-        </Link>
+        <Shortcut to="/live" title="Temps réel" desc="Courbes multi-tags en direct" />
+        <Shortcut to="/production" title="Production" desc="Par shift, qualité, rebut" />
+        <Shortcut to="/tags" title="Tags" desc="Configuration, unités, échelle" />
         {admin && (
-          <Link to="/devices" className="home-card">
-            <div className="home-card-title">Automates</div>
-            <div className="home-card-sub">Sources, adresses, déploiement</div>
-          </Link>
+          <Shortcut to="/devices" title="Automates" desc="Sources, adresses, déploiement" />
         )}
         {admin && (
-          <Link to="/admin" className="home-card">
-            <div className="home-card-title">Administration</div>
-            <div className="home-card-sub">Utilisateurs, rôles, audit</div>
-          </Link>
+          <Shortcut to="/admin" title="Administration" desc="Utilisateurs, rôles, audit" />
         )}
       </div>
     </div>
+  );
+}
+
+function Kpi({
+  label,
+  value,
+  hint,
+  tone,
+}: {
+  label: string;
+  value: number | string;
+  hint?: string;
+  tone?: "green" | "amber";
+}) {
+  return (
+    <div className="card kpi">
+      <div className="kpi-label">{label}</div>
+      <div className={`kpi-value ${tone ?? ""}`}>{value}</div>
+      {hint && <div className="kpi-hint">{hint}</div>}
+    </div>
+  );
+}
+
+function Shortcut({ to, title, desc }: { to: string; title: string; desc: string }) {
+  return (
+    <Link to={to} className="home-card">
+      <div className="home-card-title">{title}</div>
+      <div className="home-card-sub">{desc}</div>
+    </Link>
   );
 }

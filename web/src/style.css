@@ -203,6 +203,43 @@ main {
   padding: 0 4px;
 }
 
+/* ─── Accueil : KPIs ───────────────────────────────────────────── */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.kpi {
+  padding: 18px 20px;
+}
+
+.kpi-label {
+  color: #8b97a7;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.kpi-value {
+  color: #e6edf3;
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.kpi-value.green {
+  color: #3fb950;
+}
+.kpi-value.amber {
+  color: #f0883e;
+}
+
+.kpi-hint {
+  color: #8b97a7;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
 /* ─── Accueil : grille de raccourcis ───────────────────────────── */
 .home-grid {
   display: grid;
