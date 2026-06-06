@@ -7,7 +7,6 @@ export type SeriesDef = {
   tag: string;
   label: string;
   color: string;
-  axis: "left" | "right";
   unit?: string | null;
 };
 
@@ -20,7 +19,7 @@ type Props = {
 
 /** Signature qui déclenche la RECRÉATION du plot (structure des séries changée). */
 function structureKey(series: SeriesDef[]): string {
-  return series.map((s) => `${s.tag}|${s.color}|${s.axis}`).join(",");
+  return series.map((s) => `${s.tag}|${s.color}|${s.unit ?? ""}`).join(",");
 }
 
 /**
@@ -38,7 +37,77 @@ function shape(data: uPlot.AlignedData, count: number): uPlot.AlignedData {
   return [xs, ...cols] as uPlot.AlignedData;
 }
 
-/** Graphe uPlot multi-séries avec double axe (gauche/droite). */
+/** Unités distinctes dans l'ordre d'apparition (null = sans unité). */
+function distinctUnits(series: SeriesDef[]): (string | null)[] {
+  const units: (string | null)[] = [];
+  for (const s of series) {
+    const u = s.unit ?? null;
+    if (!units.some((x) => x === u)) units.push(u);
+  }
+  return units;
+}
+
+/** Dernière valeur non nulle au plus tard à l'index `idx` (report LOCF). */
+function locf(col: readonly (number | null | undefined)[], idx: number): number | null {
+  for (let i = idx; i >= 0; i--) {
+    const v = col[i];
+    if (v != null) return v;
+  }
+  return null;
+}
+
+function fmtTime(tsec: number): string {
+  return new Date(tsec * 1000).toLocaleTimeString();
+}
+
+/**
+ * Tooltip multi-séries : au curseur, affiche pour CHAQUE série sa dernière valeur
+ * connue (LOCF). Remplace la légende live de uPlot (qui clignote/recircule).
+ * Layout fixe + tabular-nums => pas de saut quand les valeurs changent.
+ */
+function tooltipPlugin(series: SeriesDef[]): uPlot.Plugin {
+  let tip: HTMLDivElement;
+  return {
+    hooks: {
+      init: (u) => {
+        tip = document.createElement("div");
+        tip.className = "u-tooltip";
+        tip.style.display = "none";
+        u.over.appendChild(tip);
+      },
+      setCursor: (u) => {
+        const idx = u.cursor.idx;
+        const left = u.cursor.left ?? -1;
+        const top = u.cursor.top ?? -1;
+        if (idx == null || left < 0) {
+          tip.style.display = "none";
+          return;
+        }
+        const xs = u.data[0] as number[];
+        let html = `<div class="u-tt-time">${fmtTime(xs[idx])}</div>`;
+        series.forEach((s, i) => {
+          const v = locf(u.data[i + 1] as (number | null)[], idx);
+          const val = v == null ? "—" : v.toFixed(2);
+          const unit = s.unit ? ` ${s.unit}` : "";
+          html +=
+            `<div class="u-tt-row">` +
+            `<span class="u-tt-dot" style="background:${s.color}"></span>` +
+            `<span class="u-tt-lbl">${s.label}</span>` +
+            `<span class="u-tt-val">${val}${unit}</span>` +
+            `</div>`;
+        });
+        tip.innerHTML = html;
+        tip.style.display = "block";
+        // Bascule à gauche du curseur quand on approche du bord droit.
+        tip.classList.toggle("flip", left > u.over.clientWidth / 2);
+        tip.style.left = `${left}px`;
+        tip.style.top = `${top}px`;
+      },
+    },
+  };
+}
+
+/** Graphe uPlot multi-séries : une échelle/axe par unité, tooltip multi-séries. */
 export function MultiChart({ data, series, height = 420 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const plot = useRef<uPlot | null>(null);
@@ -48,18 +117,17 @@ export function MultiChart({ data, series, height = 420 }: Props) {
   useEffect(() => {
     if (!ref.current) return;
     // La clé inclut "y a-t-il des données ?" : un plot créé VIDE ne réveille pas
-    // l'auto-range au premier setData (symptôme : 1 série n'apparaît qu'après un
-    // changement d'axe, qui recrée le plot). On force donc une recréation au
-    // passage vide -> non-vide.
+    // l'auto-range au premier setData. + `theme` => recréation au toggle (couleurs
+    // canvas figées à la création).
     const hasData = ((data[0] as number[] | undefined)?.length ?? 0) > 0;
-    // `theme` dans la clé => recréation du plot au toggle clair/sombre (les
-    // couleurs canvas étant figées à la création).
     const key = structureKey(series) + theme + (hasData ? "#data" : "#empty");
     if (plot.current && key === lastKey.current) return; // structure inchangée
     lastKey.current = key;
     plot.current?.destroy();
 
-    const hasRight = series.some((s) => s.axis === "right");
+    const units = distinctUnits(series);
+    // Une échelle par unité ; clé stable indexée sur la liste des unités.
+    const scaleOf = (u: string | null) => `y${units.findIndex((x) => x === u)}`;
 
     const uSeries: uPlot.Series[] = [
       {},
@@ -67,43 +135,38 @@ export function MultiChart({ data, series, height = 420 }: Props) {
         label: s.label,
         stroke: s.color,
         width: 2,
-        scale: s.axis,
+        scale: scaleOf(s.unit ?? null),
         spanGaps: true, // relie par-dessus les null (séries non synchrones)
         points: { show: false },
-        value: (_u: uPlot, v: number | null) =>
-          v == null ? "—" : v.toFixed(2) + (s.unit ? " " + s.unit : ""),
       })),
     ];
 
+    const scales: uPlot.Scales = { x: { time: true } };
+    for (const u of units) scales[scaleOf(u)] = { auto: true };
+
     // Couleurs lues dans le thème courant (la classe .dark est déjà à jour ici).
     const ax = chartAxisTheme();
-    const axes: uPlot.Axis[] = [
-      { stroke: ax.stroke, grid: { stroke: ax.grid } },
-      { scale: "left", stroke: ax.stroke, grid: { stroke: ax.grid } },
-    ];
-    if (hasRight) {
+    // x + un axe par unité : 1ʳᵉ unité à gauche, les suivantes à droite (empilées).
+    const axes: uPlot.Axis[] = [{ stroke: ax.stroke, grid: { stroke: ax.grid } }];
+    units.forEach((u, i) => {
       axes.push({
-        scale: "right",
-        side: 1,
+        scale: scaleOf(u),
+        side: i === 0 ? 3 : 1,
+        label: u ?? "",
         stroke: ax.stroke,
-        grid: { show: false },
+        grid: i === 0 ? { stroke: ax.grid } : { show: false },
       });
-    }
-
-    // Ne déclarer que les scales réellement utilisées : une scale `right`
-    // déclarée sans série dessus empêche uPlot de bien initialiser le rendu
-    // (symptôme : rien ne s'affiche tant qu'on n'a pas 2 séries dont une à droite).
-    const scales: uPlot.Scales = { x: { time: true }, left: { auto: true } };
-    if (hasRight) scales.right = { auto: true };
+    });
 
     const opts: uPlot.Options = {
       width: ref.current.clientWidth,
       height,
       scales,
-      legend: { show: true, live: true },
+      legend: { show: false }, // remplacée par le tooltip multi-séries
       cursor: { focus: { prox: 16 } },
       series: uSeries,
       axes,
+      plugins: [tooltipPlugin(series)],
     };
 
     plot.current = new uPlot(opts, shape(data, series.length), ref.current);

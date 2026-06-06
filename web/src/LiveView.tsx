@@ -14,11 +14,11 @@ const WINDOWS = [
 ];
 
 /** Série sélectionnée : on stocke l'INDEX de couleur (pas la couleur figée), pour
- *  que la teinte soit résolue dans la palette du thème courant au rendu. */
+ *  que la teinte soit résolue dans la palette du thème courant au rendu. L'axe est
+ *  désormais déduit automatiquement de l'unité (cf. MultiChart). */
 type Selected = {
   tag: string;
   label: string;
-  axis: "left" | "right";
   unit?: string | null;
   idx: number;
 };
@@ -44,11 +44,22 @@ export function LiveView() {
         tag: s.tag,
         label: s.label,
         color: colorOf(s.idx),
-        axis: s.axis,
         unit: s.unit,
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [selected, palette],
+  );
+
+  // Dernière valeur connue par série (pour l'afficher en direct dans les chips).
+  const latest = useMemo<(number | null)[]>(
+    () =>
+      selected.map((_, i) => {
+        const col = data[i + 1] as (number | null)[] | undefined;
+        if (!col) return null;
+        for (let j = col.length - 1; j >= 0; j--) if (col[j] != null) return col[j];
+        return null;
+      }),
+    [data, selected],
   );
 
   // 1) Charger la liste des tags configurés.
@@ -103,7 +114,7 @@ export function LiveView() {
       loadHistory(t.name, windowSec);
       return [
         ...cur,
-        { tag: t.name, label: tagLabel(t), idx: cur.length, axis: "left", unit: t.unit },
+        { tag: t.name, label: tagLabel(t), idx: cur.length, unit: t.unit },
       ];
     });
   };
@@ -115,9 +126,6 @@ export function LiveView() {
     for (const s of selected) loadHistory(s.tag, windowSec);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [windowSec]);
-
-  const setAxis = (tag: string, axis: "left" | "right") =>
-    setSelected((cur) => cur.map((s) => (s.tag === tag ? { ...s, axis } : s)));
 
   const removeAll = () => {
     clear();
@@ -180,20 +188,18 @@ export function LiveView() {
         {/* Chips des séries : couleur, libellé, choix d'axe, retrait */}
         {selected.length > 0 && (
           <div className="series-chips">
-            {selected.map((s) => (
+            {selected.map((s, i) => (
               <span key={s.tag} className="series-chip">
                 <span className="dot" style={{ background: colorOf(s.idx) }} />
                 <span className="series-chip-label">{s.label}</span>
-                <button
-                  className={`axis-toggle ${s.axis}`}
-                  title="Basculer l'axe (gauche/droite)"
-                  onClick={() => setAxis(s.tag, s.axis === "left" ? "right" : "left")}
-                >
-                  {s.axis === "left" ? "◧ G" : "D ◨"}
-                </button>
+                <span className="series-chip-val tabular-nums">
+                  {latest[i] == null ? "—" : latest[i]!.toFixed(2)}
+                  {s.unit ? ` ${s.unit}` : ""}
+                </span>
                 <button
                   className="x"
                   onClick={() => toggleTag({ name: s.tag } as Tag)}
+                  title="Retirer"
                 >
                   ✕
                 </button>
