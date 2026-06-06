@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useAuth } from "./auth";
 import { ApiError } from "./api";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export function LoginView() {
   const { login } = useAuth();
@@ -27,32 +29,39 @@ export function LoginView() {
   };
 
   return (
-    <div className="login-wrap">
-      <form className="login-card" onSubmit={submit}>
-        <h1>STRATA</h1>
-        <div className="sub">Connexion</div>
-        <label>
+    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <form
+        onSubmit={submit}
+        className="w-full max-w-sm space-y-4 rounded-xl border border-border bg-card p-8 shadow-sm"
+      >
+        <div>
+          <h1 className="text-2xl font-semibold tracking-[0.15em] text-foreground">STRATA</h1>
+          <p className="text-sm text-muted-foreground">Connexion</p>
+        </div>
+        <label className="flex flex-col gap-1.5 text-sm text-muted-foreground">
           Utilisateur
-          <input
+          <Input
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             autoFocus
             autoComplete="username"
           />
         </label>
-        <label>
+        <label className="flex flex-col gap-1.5 text-sm text-muted-foreground">
           Mot de passe
-          <input
+          <Input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
           />
         </label>
-        {error && <div className="login-error">{error}</div>}
-        <button type="submit" disabled={busy || !username || !password}>
+        {error && (
+          <div className="rounded-md bg-bad/15 px-3 py-2 text-sm text-bad">{error}</div>
+        )}
+        <Button type="submit" className="w-full" disabled={busy || !username || !password}>
           {busy ? "Connexion…" : "Se connecter"}
-        </button>
+        </Button>
       </form>
     </div>
   );

@@ -1,6 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  CheckCircle2,
+  Cpu,
+  Factory,
+  LineChart,
+  ShieldCheck,
+  Tags as TagsIcon,
+  TriangleAlert,
+} from "lucide-react";
+import {
   fetchDevices,
   fetchProduction,
   fetchTags,
@@ -10,8 +19,10 @@ import {
   type Tag,
 } from "./api";
 import { useAuth } from "./auth";
+import { PageHeader } from "@/components/PageHeader";
+import { KpiCard } from "@/components/KpiCard";
 
-/** Page d'accueil : tableau de bord (KPIs + raccourcis), style maison cohérent. */
+/** Page d'accueil : tableau de bord (KPIs + raccourcis). */
 export function HomeView() {
   const { user } = useAuth();
   const admin = userIsAdmin(user);
@@ -34,61 +45,55 @@ export function HomeView() {
   const scrapRate = ok + scrap ? ((scrap / (ok + scrap)) * 100).toFixed(1) : "—";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <div>
-        <h2 className="card-title">Bonjour, {user?.display_name ?? user?.username}</h2>
-        <p className="hint">Vue d'ensemble de la plateforme.</p>
+    <>
+      <PageHeader
+        title={`Bonjour, ${user?.display_name ?? user?.username}`}
+        description="Vue d'ensemble de la plateforme."
+      />
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <KpiCard label="Tags actifs" value={enabled} hint={`${tags.length} au total`} icon={TagsIcon} />
+        <KpiCard label="Bonnes (aujourd'hui)" value={ok} hint="toutes lignes" tone="good" icon={CheckCircle2} />
+        <KpiCard label="Taux de rebut" value={`${scrapRate}%`} hint="aujourd'hui" tone="warn" icon={TriangleAlert} />
+        {admin && <KpiCard label="Automates" value={devices.length} hint="sources" icon={Cpu} />}
       </div>
 
-      {/* KPIs */}
-      <div className="kpi-grid">
-        <Kpi label="Tags actifs" value={enabled} hint={`${tags.length} au total`} />
-        <Kpi label="Bonnes (aujourd'hui)" value={ok} hint="toutes lignes" tone="green" />
-        <Kpi label="Taux de rebut" value={`${scrapRate}%`} hint="aujourd'hui" tone="amber" />
-        {admin && <Kpi label="Automates" value={devices.length} hint="sources" />}
-      </div>
-
-      {/* Raccourcis */}
-      <div className="home-grid">
-        <Shortcut to="/live" title="Temps réel" desc="Courbes multi-tags en direct" />
-        <Shortcut to="/production" title="Production" desc="Par shift, qualité, rebut" />
-        <Shortcut to="/tags" title="Tags" desc="Configuration, unités, échelle" />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Shortcut to="/explorer" title="Explorer" desc="Temps réel & historique, multi-courbes" icon={LineChart} />
+        <Shortcut to="/production" title="Production" desc="Par shift, qualité, rebut" icon={Factory} />
+        <Shortcut to="/tags" title="Tags" desc="Configuration, unités, échelle" icon={TagsIcon} />
         {admin && (
-          <Shortcut to="/devices" title="Automates" desc="Sources, adresses, déploiement" />
+          <Shortcut to="/devices" title="Automates" desc="Sources, adresses, déploiement" icon={Cpu} />
         )}
         {admin && (
-          <Shortcut to="/admin" title="Administration" desc="Utilisateurs, rôles, audit" />
+          <Shortcut to="/admin" title="Administration" desc="Utilisateurs, rôles, audit" icon={ShieldCheck} />
         )}
       </div>
-    </div>
+    </>
   );
 }
 
-function Kpi({
-  label,
-  value,
-  hint,
-  tone,
+function Shortcut({
+  to,
+  title,
+  desc,
+  icon: Icon,
 }: {
-  label: string;
-  value: number | string;
-  hint?: string;
-  tone?: "green" | "amber";
+  to: string;
+  title: string;
+  desc: string;
+  icon: typeof LineChart;
 }) {
   return (
-    <div className="card kpi">
-      <div className="kpi-label">{label}</div>
-      <div className={`kpi-value ${tone ?? ""}`}>{value}</div>
-      {hint && <div className="kpi-hint">{hint}</div>}
-    </div>
-  );
-}
-
-function Shortcut({ to, title, desc }: { to: string; title: string; desc: string }) {
-  return (
-    <Link to={to} className="home-card">
-      <div className="home-card-title">{title}</div>
-      <div className="home-card-sub">{desc}</div>
+    <Link
+      to={to}
+      className="group block rounded-xl border border-border bg-card p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-primary"
+    >
+      <div className="mb-2 flex items-center gap-2">
+        <Icon className="size-4 text-muted-foreground transition-colors group-hover:text-primary" />
+        <span className="font-semibold text-foreground">{title}</span>
+      </div>
+      <div className="text-sm text-muted-foreground">{desc}</div>
     </Link>
   );
 }

@@ -1,29 +1,173 @@
 @import "tailwindcss";
 
-/* Active la variante `dark:` via la classe .dark sur <html> (on est en sombre). */
+/* Active la variante `dark:` via la classe .dark sur <html>. Le thème (clair/sombre)
+   est piloté par ThemeProvider (src/theme.tsx) qui pose/retire cette classe. */
 @custom-variant dark (&:is(.dark *));
 
-/* Variables de thème pour shadcn/ui, calées sur le thème sombre de Strata
-   (#0e1116 fond, #11161d cartes, #3fb950 vert accent…). */
-@theme {
-  --color-background: #0e1116;
-  --color-foreground: #e6edf3;
-  --color-card: #11161d;
-  --color-card-foreground: #e6edf3;
-  --color-popover: #161b22;
-  --color-popover-foreground: #e6edf3;
-  --color-primary: #3fb950;
-  --color-primary-foreground: #04140a;
-  --color-secondary: #161b22;
-  --color-secondary-foreground: #e6edf3;
-  --color-muted: #161b22;
-  --color-muted-foreground: #8b97a7;
-  --color-accent: #11202e;
-  --color-accent-foreground: #e6edf3;
-  --color-destructive: #f85149;
-  --color-destructive-foreground: #ffffff;
-  --color-border: #2d3645;
-  --color-input: #2d3645;
-  --color-ring: #3fb950;
+/* ─────────────────────────────────────────────────────────────────────────────
+   Source de vérité unique des couleurs : des *tokens* sémantiques, déclinés en
+   clair (:root) et sombre (.dark). AUCUNE couleur en dur ailleurs dans le code —
+   tout passe par ces variables via Tailwind (bg-background, text-muted-foreground…)
+   pour que le toggle clair/sombre fonctionne partout automatiquement.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* — Surfaces & texte — */
+  --background: #f6f7f9;
+  --foreground: #1a1f26;
+  --card: #ffffff;
+  --card-foreground: #1a1f26;
+  --popover: #ffffff;
+  --popover-foreground: #1a1f26;
+
+  /* — Accent de marque (vert Strata, assombri pour le contraste sur fond clair) — */
+  --primary: #1a7f37;
+  --primary-foreground: #ffffff;
+
+  --secondary: #eceef1;
+  --secondary-foreground: #1f2630;
+  --muted: #eceef1;
+  --muted-foreground: #5b6675;
+  --accent: #e6f3ea;
+  --accent-foreground: #0e3a1c;
+  --destructive: #cf222e;
+  --destructive-foreground: #ffffff;
+
+  --border: #d7dce2;
+  --input: #d7dce2;
+  --ring: #1a7f37;
+
+  /* — Tokens métier : la couleur *signifie* un état (qualité / vie / alarme) — */
+  --good: #1a7f37;
+  --good-foreground: #ffffff;
+  --warn: #b5650b;
+  --warn-foreground: #ffffff;
+  --bad: #cf222e;
+  --bad-foreground: #ffffff;
+  --live: #1a7f37;
+  --stale: #8b97a7;
+
+  /* — Palette de séries pour les graphes (déterministe, indexée par tag) — */
+  --chart-1: #2da44e;
+  --chart-2: #2f81f7;
+  --chart-3: #d4710b;
+  --chart-4: #8250df;
+  --chart-5: #bf3989;
+  --chart-6: #0a9aa6;
+  --chart-7: #b58500;
+  --chart-8: #cf4b35;
+
   --radius: 0.5rem;
+}
+
+.dark {
+  /* — Surfaces & texte (charte sombre historique de Strata) — */
+  --background: #0e1116;
+  --foreground: #e6edf3;
+  --card: #11161d;
+  --card-foreground: #e6edf3;
+  --popover: #161b22;
+  --popover-foreground: #e6edf3;
+
+  --primary: #3fb950;
+  --primary-foreground: #04140a;
+
+  --secondary: #161b22;
+  --secondary-foreground: #e6edf3;
+  --muted: #161b22;
+  --muted-foreground: #8b97a7;
+  --accent: #11202e;
+  --accent-foreground: #e6edf3;
+  --destructive: #f85149;
+  --destructive-foreground: #ffffff;
+
+  --border: #2d3645;
+  --input: #2d3645;
+  --ring: #3fb950;
+
+  --good: #3fb950;
+  --good-foreground: #04140a;
+  --warn: #f0883e;
+  --warn-foreground: #1a1206;
+  --bad: #f85149;
+  --bad-foreground: #1a0606;
+  --live: #3fb950;
+  --stale: #8b97a7;
+
+  --chart-1: #3fb950;
+  --chart-2: #58a6ff;
+  --chart-3: #f0883e;
+  --chart-4: #bc8cff;
+  --chart-5: #f778ba;
+  --chart-6: #56d4dd;
+  --chart-7: #e3b341;
+  --chart-8: #ff7b72;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Exposition des tokens à Tailwind : génère les utilitaires (bg-*, text-*,
+   border-*…). `inline` => les utilitaires pointent vers les var() ci-dessus,
+   donc ils suivent le thème actif sans recompilation.
+   ───────────────────────────────────────────────────────────────────────────── */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Tokens métier */
+  --color-good: var(--good);
+  --color-good-foreground: var(--good-foreground);
+  --color-warn: var(--warn);
+  --color-warn-foreground: var(--warn-foreground);
+  --color-bad: var(--bad);
+  --color-bad-foreground: var(--bad-foreground);
+  --color-live: var(--live);
+  --color-stale: var(--stale);
+
+  /* Séries de graphes */
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+  --color-chart-7: var(--chart-7);
+  --color-chart-8: var(--chart-8);
+
+  /* Rayons dérivés (convention shadcn) */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* Réglages de base pilotés par les tokens (le toggle agit dès ici). */
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+  }
+  /* Valeurs numériques alignées (lisibilité industrielle des compteurs/mesures). */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
 }

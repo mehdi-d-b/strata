@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import {
   PROTOCOLS,
   deleteDevice,
@@ -13,6 +15,18 @@ import {
   type DeviceTag,
   type Protocol,
 } from "./api";
+import { PageHeader } from "@/components/PageHeader";
+import { Section } from "@/components/Section";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 export function DevicesView() {
   const [devices, setDevices] = useState<Device[]>([]);
@@ -24,7 +38,11 @@ export function DevicesView() {
   }, []);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <>
+      <PageHeader
+        title="Automates"
+        description="Sources d'acquisition : protocole, adresses, déploiement des connecteurs."
+      />
       <DeviceList
         devices={devices}
         selected={selected}
@@ -32,7 +50,7 @@ export function DevicesView() {
         onChange={load}
       />
       {selected && <DeviceDetail device={selected} onChange={load} />}
-    </div>
+    </>
   );
 }
 
@@ -58,7 +76,6 @@ function DeviceList({
   };
   const [nd, setNd] = useState(blank);
   const [deploying, setDeploying] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
 
   const create = async () => {
     if (!nd.name || !nd.host) return;
@@ -69,66 +86,87 @@ function DeviceList({
 
   const onDeploy = async (name: string) => {
     setDeploying(name);
-    setMsg(null);
     const r = await deployDevice(name);
-    setMsg(`${r.ok ? "✅" : "⚠️"} ${r.device} : ${r.detail}`);
+    (r.ok ? toast.success : toast.error)(`${r.device} : ${r.detail}`);
     setDeploying(null);
   };
 
   return (
-    <div className="card">
-      <h2 className="card-title">Automates</h2>
-      <table className="tags">
-        <thead>
-          <tr>
-            <th>Nom</th>
-            <th>Protocole</th>
-            <th>Hôte</th>
-            <th>Base tag</th>
-            <th>Tags</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
+    <Section
+      title="Automates"
+      hint={
+        <>
+          Le <code>base tag</code> est le préfixe métier appliqué aux points de cet
+          automate (ex : <code>brasserie.ipa</code> →{" "}
+          <code>brasserie.ipa.fermenteur.temperature</code>). « Déployer » génère et
+          pousse le connecteur PLC4X vers Kafka Connect (profil <code>plc4x</code> requis).
+        </>
+      }
+    >
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Nom</TableHead>
+            <TableHead>Protocole</TableHead>
+            <TableHead>Hôte</TableHead>
+            <TableHead>Base tag</TableHead>
+            <TableHead>Tags</TableHead>
+            <TableHead />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {devices.map((d) => (
-            <tr
-              key={d.name}
-              className={selected === d.name ? "row-selected" : ""}
-            >
-              <td>
-                <button className="linkish" onClick={() => onSelect(d.name)}>
+            <TableRow key={d.name} data-state={selected === d.name ? "selected" : undefined}>
+              <TableCell>
+                <button
+                  className="font-medium text-[var(--chart-2)] underline-offset-2 hover:underline"
+                  onClick={() => onSelect(d.name)}
+                >
                   {d.name}
                 </button>
-              </td>
-              <td><code>{d.protocol}</code></td>
-              <td>{d.host}</td>
-              <td><code>{d.base_tag ?? "—"}</code></td>
-              <td>{d.tag_count}</td>
-              <td>
-                <button onClick={() => onDeploy(d.name)} disabled={deploying === d.name}>
-                  {deploying === d.name ? "…" : "Déployer"}
-                </button>
-                <button className="ghost" onClick={() => undeployDevice(d.name).then(onChange)}>
-                  Retirer
-                </button>
-                <button
-                  className="ghost"
-                  onClick={() => {
-                    if (confirm(`Supprimer l'automate ${d.name} ?`))
-                      deleteDevice(d.name).then(onChange);
-                  }}
-                >
-                  ✕
-                </button>
-              </td>
-            </tr>
+              </TableCell>
+              <TableCell>
+                <code className="text-[var(--chart-2)]">{d.protocol}</code>
+              </TableCell>
+              <TableCell>{d.host}</TableCell>
+              <TableCell>
+                <code className="text-[var(--chart-2)]">{d.base_tag ?? "—"}</code>
+              </TableCell>
+              <TableCell className="tabular-nums">{d.tag_count}</TableCell>
+              <TableCell>
+                <div className="flex items-center gap-1">
+                  <Button size="sm" onClick={() => onDeploy(d.name)} disabled={deploying === d.name}>
+                    {deploying === d.name ? "…" : "Déployer"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => undeployDevice(d.name).then(onChange)}
+                  >
+                    Retirer
+                  </Button>
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    className="text-destructive hover:text-destructive"
+                    title="Supprimer l'automate"
+                    onClick={() => {
+                      if (confirm(`Supprimer l'automate ${d.name} ?`))
+                        deleteDevice(d.name).then(onChange);
+                    }}
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
-      {msg && <p className="hint">{msg}</p>}
+        </TableBody>
+      </Table>
 
-      <div className="newrow">
-        <input
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Input
+          className="w-56"
           placeholder="nom (ex: ipa-fermenteur)"
           value={nd.name}
           onChange={(e) => setNd({ ...nd, name: e.target.value })}
@@ -143,27 +181,24 @@ function DeviceList({
             </option>
           ))}
         </select>
-        <input
+        <Input
+          className="w-40"
           placeholder="hôte/IP"
           value={nd.host}
           onChange={(e) => setNd({ ...nd, host: e.target.value })}
         />
-        <input
+        <Input
+          className="w-56"
           placeholder="base tag (ex: brasserie.ipa)"
           value={nd.base_tag}
           onChange={(e) => setNd({ ...nd, base_tag: e.target.value })}
         />
-        <button className="add" onClick={create}>
-          + Ajouter
-        </button>
+        <Button size="sm" variant="outline" onClick={create}>
+          <Plus />
+          Ajouter
+        </Button>
       </div>
-      <p className="hint">
-        Le <code>base tag</code> est le préfixe métier appliqué aux points de cet
-        automate (ex : <code>brasserie.ipa</code> →{" "}
-        <code>brasserie.ipa.fermenteur.temperature</code>). « Déployer » génère et
-        pousse le connecteur PLC4X vers Kafka Connect (profil <code>plc4x</code> requis).
-      </p>
-    </div>
+    </Section>
   );
 }
 
@@ -173,7 +208,6 @@ function DeviceDetail({ device, onChange }: { device: string; onChange: () => vo
   const [tags, setTags] = useState<DeviceTag[]>([]);
   const [nt, setNt] = useState({ name: "", address: "", datatype: "DINT" });
   const [csv, setCsv] = useState("");
-  const [importMsg, setImportMsg] = useState<string | null>(null);
 
   const load = () =>
     fetchDeviceTags(device).then(setTags).catch(() => setTags([]));
@@ -191,71 +225,75 @@ function DeviceDetail({ device, onChange }: { device: string; onChange: () => vo
 
   const doImport = async () => {
     const r = await importTagsCsv(device, csv);
-    setImportMsg(
+    const txt =
       `${r.imported} tag(s) importé(s)` +
-        (r.errors.length ? ` — ${r.errors.length} ligne(s) ignorée(s)` : ""),
-    );
+      (r.errors.length ? ` — ${r.errors.length} ligne(s) ignorée(s)` : "");
+    (r.errors.length ? toast.warning : toast.success)(txt);
     setCsv("");
     load();
     onChange();
   };
 
   return (
-    <div className="card">
-      <h2 className="card-title">Tags de « {device} »</h2>
-      <table className="tags">
-        <thead>
-          <tr>
-            <th>Tag</th>
-            <th>Adresse physique</th>
-            <th>Type</th>
-            <th>Unité</th>
-          </tr>
-        </thead>
-        <tbody>
+    <Section title={`Tags de « ${device} »`}>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Tag</TableHead>
+            <TableHead>Adresse physique</TableHead>
+            <TableHead>Type</TableHead>
+            <TableHead>Unité</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {tags.map((t) => (
-            <tr key={t.name}>
-              <td><code>{t.name}</code></td>
-              <td><code>{t.address ?? "—"}</code></td>
-              <td>{t.datatype ?? "—"}</td>
-              <td>{t.unit ?? "—"}</td>
-            </tr>
+            <TableRow key={t.name}>
+              <TableCell>
+                <code className="text-[var(--chart-2)]">{t.name}</code>
+              </TableCell>
+              <TableCell>
+                <code className="text-[var(--chart-2)]">{t.address ?? "—"}</code>
+              </TableCell>
+              <TableCell>{t.datatype ?? "—"}</TableCell>
+              <TableCell>{t.unit ?? "—"}</TableCell>
+            </TableRow>
           ))}
           {tags.length === 0 && (
-            <tr>
-              <td colSpan={4} style={{ color: "#8b97a7" }}>
+            <TableRow>
+              <TableCell colSpan={4} className="text-muted-foreground">
                 Aucun tag. Ajoute-en un ou importe un CSV.
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           )}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
 
-      <div className="newrow">
-        <input
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Input
+          className="flex-[2]"
           placeholder="nom du tag (ex: brasserie.ipa.fermenteur.temperature)"
           value={nt.name}
           onChange={(e) => setNt({ ...nt, name: e.target.value })}
-          style={{ flex: 2 }}
         />
-        <input
+        <Input
+          className="flex-1"
           placeholder="adresse (ex: holding-register:1:DINT)"
           value={nt.address}
           onChange={(e) => setNt({ ...nt, address: e.target.value })}
-          style={{ flex: 1 }}
         />
-        <button className="add" onClick={addTag}>
-          + Tag
-        </button>
+        <Button size="sm" variant="outline" onClick={addTag}>
+          <Plus />
+          Tag
+        </Button>
       </div>
 
-      <div style={{ marginTop: 16 }}>
-        <div className="hint" style={{ marginBottom: 6 }}>
+      <div className="mt-5">
+        <div className="mb-1.5 text-xs text-muted-foreground">
           Import CSV — une ligne par tag : <code>tag,adresse[,type[,unité]]</code>
         </div>
         <textarea
-          className="csv"
           rows={4}
+          className="w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"
           placeholder={
             "brasserie.ipa.fermenteur.temperature,holding-register:1:DINT,DINT,°C\n" +
             "brasserie.ipa.fermenteur.pression,holding-register:2:DINT,DINT,bar"
@@ -263,13 +301,12 @@ function DeviceDetail({ device, onChange }: { device: string; onChange: () => vo
           value={csv}
           onChange={(e) => setCsv(e.target.value)}
         />
-        <div style={{ marginTop: 8 }}>
-          <button className="add" onClick={doImport} disabled={!csv.trim()}>
+        <div className="mt-2">
+          <Button size="sm" onClick={doImport} disabled={!csv.trim()}>
             Importer
-          </button>
-          {importMsg && <span className="hint" style={{ marginLeft: 10 }}>{importMsg}</span>}
+          </Button>
         </div>
       </div>
-    </div>
+    </Section>
   );
 }
