@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/PageHeader";
 import { useTheme } from "./theme";
 import { chartPalette } from "./chartTheme";
+import { loadPrefs } from "./prefs";
 import {
   fetchHistory,
   fetchHistoryRange,
@@ -64,7 +65,10 @@ export function LiveView() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Selected[]>([]);
-  const [range, setRange] = useState<Range>({ mode: "relative", sec: 300 });
+  const [range, setRange] = useState<Range>(() => ({
+    mode: "relative",
+    sec: loadPrefs().defaultWindowSec,
+  }));
   const [live, setLive] = useState(false);
   const [paused, setPaused] = useState(false);
 
@@ -263,7 +267,7 @@ export function LiveView() {
   };
   const backToLive = () => {
     setPaused(false);
-    setRange({ mode: "relative", sec: 300 });
+    setRange({ mode: "relative", sec: loadPrefs().defaultWindowSec });
   };
 
   // Export CSV de la fenêtre courante : time ISO + une colonne par série.

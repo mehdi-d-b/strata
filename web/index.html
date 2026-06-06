@@ -15,6 +15,9 @@
           if (t !== "light" && t !== "dark") t = "dark";
           document.documentElement.classList.toggle("dark", t === "dark");
           document.documentElement.style.colorScheme = t;
+          var p = JSON.parse(localStorage.getItem("strata.prefs") || "{}");
+          if (p.density === "compact")
+            document.documentElement.dataset.density = "compact";
         } catch (e) {}
       })();
     </script>

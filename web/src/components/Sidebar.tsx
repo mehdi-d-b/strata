@@ -8,6 +8,7 @@ import {
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
+  Search,
   Settings,
   ShieldCheck,
   Tags,
@@ -56,7 +57,7 @@ const NAV: NavGroup[] = [
 const STORAGE_KEY = "strata-sidebar-collapsed";
 
 /** Barre latérale de navigation : marque, sections groupées, pied utilisateur. */
-export function Sidebar() {
+export function Sidebar({ onSearch }: { onSearch: () => void }) {
   const { user, logout } = useAuth();
   const admin = userIsAdmin(user);
 
@@ -91,6 +92,26 @@ export function Sidebar() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Recherche / palette de commandes */}
+      <div className="px-3 pb-1">
+        <button
+          onClick={onSearch}
+          title="Rechercher (⌘K)"
+          className={cn(
+            "flex w-full items-center gap-2 rounded-md border border-border bg-background px-2 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground",
+            collapsed && "justify-center",
+          )}
+        >
+          <Search className="size-4 shrink-0" />
+          {!collapsed && (
+            <>
+              <span>Rechercher…</span>
+              <kbd className="ml-auto rounded border border-border px-1.5 text-[10px]">⌘K</kbd>
+            </>
+          )}
+        </button>
       </div>
 
       {/* Navigation */}

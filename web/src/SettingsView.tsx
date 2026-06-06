@@ -12,6 +12,8 @@ import {
   type SystemInfo,
 } from "./api";
 import { useAuth } from "./auth";
+import { loadPrefs, savePrefs } from "./prefs";
+import { useDensity } from "./density";
 import { PageHeader } from "@/components/PageHeader";
 import { Section } from "@/components/Section";
 import { TabBar } from "@/components/TabBar";
@@ -117,26 +119,27 @@ function AccountSection() {
 
 // ─── Affichage (préférences locales) ─────────────────────────────────────
 
-const PREF_KEY = "strata.prefs";
-export function loadPrefs(): { defaultWindowSec: number } {
-  try {
-    return { defaultWindowSec: 300, ...JSON.parse(localStorage.getItem(PREF_KEY) ?? "{}") };
-  } catch {
-    return { defaultWindowSec: 300 };
-  }
-}
-
 function DisplaySection() {
   const [win, setWin] = useState(loadPrefs().defaultWindowSec);
+  const { density, setDensity } = useDensity();
 
   const save = () => {
-    localStorage.setItem(PREF_KEY, JSON.stringify({ defaultWindowSec: win }));
+    savePrefs({ defaultWindowSec: win });
     toast.success("Préférences enregistrées.");
   };
 
   return (
     <Section title="Préférences d'affichage" hint="Stocké dans ce navigateur uniquement.">
       <div className="flex flex-col gap-3">
+        <Field label="Densité d'affichage">
+          <select
+            value={density}
+            onChange={(e) => setDensity(e.target.value as "comfortable" | "compact")}
+          >
+            <option value="comfortable">Confortable</option>
+            <option value="compact">Compacte</option>
+          </select>
+        </Field>
         <Field label="Fenêtre temps réel par défaut">
           <select value={win} onChange={(e) => setWin(Number(e.target.value))}>
             <option value={300}>5 minutes</option>
