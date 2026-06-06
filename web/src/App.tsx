@@ -26,7 +26,9 @@ export function App() {
       <Routes>
         <Route element={<Layout />}>
           <Route index element={<HomeView />} />
-          <Route path="live" element={<LiveView />} />
+          <Route path="explorer" element={<LiveView />} />
+          {/* Ancien chemin -> nouveau (compat liens existants) */}
+          <Route path="live" element={<Navigate to="/explorer" replace />} />
           <Route path="production" element={<ProductionView />} />
           <Route path="tags" element={<TagsView />} />
           <Route path="settings" element={<SettingsView />} />

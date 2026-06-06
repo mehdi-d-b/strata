@@ -5,6 +5,7 @@ import { MultiChart, type ChartApi, type SeriesDef } from "./MultiChart";
 import { useRealtimeBuffers } from "./useRealtimeBuffers";
 import { CommandBox } from "./CommandBox";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/PageHeader";
 import { useTheme } from "./theme";
 import { chartPalette } from "./chartTheme";
 import {
@@ -299,7 +300,12 @@ export function LiveView() {
         : "○ déconnecté";
 
   return (
-    <div className="live-layout">
+    <>
+      <PageHeader
+        title="Explorer"
+        description="Visualisation des tags en temps réel ou sur une plage historique."
+      />
+      <div className="live-layout">
       {/* Panneau de gauche : recherche + liste de tags */}
       <aside className="tag-picker">
         <input
@@ -466,6 +472,7 @@ export function LiveView() {
           </div>
         )}
       </section>
-    </div>
+      </div>
+    </>
   );
 }

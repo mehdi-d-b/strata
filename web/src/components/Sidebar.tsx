@@ -1,10 +1,10 @@
 import { useCallback, useState, type ComponentType } from "react";
 import { NavLink } from "react-router-dom";
 import {
-  Activity,
   Cpu,
   Factory,
   LayoutDashboard,
+  LineChart,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
@@ -33,7 +33,7 @@ const NAV: NavGroup[] = [
     label: "Supervision",
     items: [
       { to: "/", label: "Accueil", icon: LayoutDashboard, end: true },
-      { to: "/live", label: "Temps réel", icon: Activity },
+      { to: "/explorer", label: "Explorer", icon: LineChart },
       { to: "/production", label: "Production", icon: Factory },
     ],
   },

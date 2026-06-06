@@ -50,7 +50,7 @@ export function HomeView() {
 
       {/* Raccourcis */}
       <div className="home-grid">
-        <Shortcut to="/live" title="Temps réel" desc="Courbes multi-tags en direct" />
+        <Shortcut to="/explorer" title="Explorer" desc="Temps réel & historique, multi-courbes" />
         <Shortcut to="/production" title="Production" desc="Par shift, qualité, rebut" />
         <Shortcut to="/tags" title="Tags" desc="Configuration, unités, échelle" />
         {admin && (
