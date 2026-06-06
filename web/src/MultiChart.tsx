@@ -8,6 +8,8 @@ export type SeriesDef = {
   label: string;
   color: string;
   unit?: string | null;
+  /** Côté/échelle d'affichage (deux échelles indépendantes, auto-range séparé). */
+  axis: "left" | "right";
 };
 
 type Props = {
@@ -19,7 +21,7 @@ type Props = {
 
 /** Signature qui déclenche la RECRÉATION du plot (structure des séries changée). */
 function structureKey(series: SeriesDef[]): string {
-  return series.map((s) => `${s.tag}|${s.color}|${s.unit ?? ""}`).join(",");
+  return series.map((s) => `${s.tag}|${s.color}|${s.axis}|${s.unit ?? ""}`).join(",");
 }
 
 /**
@@ -37,14 +39,12 @@ function shape(data: uPlot.AlignedData, count: number): uPlot.AlignedData {
   return [xs, ...cols] as uPlot.AlignedData;
 }
 
-/** Unités distinctes dans l'ordre d'apparition (null = sans unité). */
-function distinctUnits(series: SeriesDef[]): (string | null)[] {
-  const units: (string | null)[] = [];
-  for (const s of series) {
-    const u = s.unit ?? null;
-    if (!units.some((x) => x === u)) units.push(u);
-  }
-  return units;
+/** Unité commune d'un côté si elle est uniforme et non nulle, sinon "" (pas de label). */
+function sideUnit(series: SeriesDef[], side: "left" | "right"): string {
+  const us = new Set(series.filter((s) => s.axis === side).map((s) => s.unit ?? null));
+  if (us.size !== 1) return "";
+  const u = [...us][0];
+  return u ?? "";
 }
 
 /** Dernière valeur non nulle au plus tard à l'index `idx` (report LOCF). */
@@ -125,9 +125,7 @@ export function MultiChart({ data, series, height = 420 }: Props) {
     lastKey.current = key;
     plot.current?.destroy();
 
-    const units = distinctUnits(series);
-    // Une échelle par unité ; clé stable indexée sur la liste des unités.
-    const scaleOf = (u: string | null) => `y${units.findIndex((x) => x === u)}`;
+    const hasRight = series.some((s) => s.axis === "right");
 
     const uSeries: uPlot.Series[] = [
       {},
@@ -135,28 +133,39 @@ export function MultiChart({ data, series, height = 420 }: Props) {
         label: s.label,
         stroke: s.color,
         width: 2,
-        scale: scaleOf(s.unit ?? null),
+        scale: s.axis, // "left" | "right" = deux échelles indépendantes
         spanGaps: true, // relie par-dessus les null (séries non synchrones)
         points: { show: false },
       })),
     ];
 
-    const scales: uPlot.Scales = { x: { time: true } };
-    for (const u of units) scales[scaleOf(u)] = { auto: true };
+    // Deux échelles indépendantes (auto-range séparé) : on superpose ainsi des
+    // courbes d'amplitudes très différentes en les plaçant chacune d'un côté.
+    // On ne déclare `right` que si utilisée (une scale vide bloque le rendu).
+    const scales: uPlot.Scales = { x: { time: true }, left: { auto: true } };
+    if (hasRight) scales.right = { auto: true };
 
     // Couleurs lues dans le thème courant (la classe .dark est déjà à jour ici).
     const ax = chartAxisTheme();
-    // x + un axe par unité : 1ʳᵉ unité à gauche, les suivantes à droite (empilées).
-    const axes: uPlot.Axis[] = [{ stroke: ax.stroke, grid: { stroke: ax.grid } }];
-    units.forEach((u, i) => {
-      axes.push({
-        scale: scaleOf(u),
-        side: i === 0 ? 3 : 1,
-        label: u ?? "",
+    const axes: uPlot.Axis[] = [
+      { stroke: ax.stroke, grid: { stroke: ax.grid } },
+      {
+        scale: "left",
+        side: 3,
+        label: sideUnit(series, "left"),
         stroke: ax.stroke,
-        grid: i === 0 ? { stroke: ax.grid } : { show: false },
+        grid: { stroke: ax.grid },
+      },
+    ];
+    if (hasRight) {
+      axes.push({
+        scale: "right",
+        side: 1,
+        label: sideUnit(series, "right"),
+        stroke: ax.stroke,
+        grid: { show: false },
       });
-    });
+    }
 
     const opts: uPlot.Options = {
       width: ref.current.clientWidth,

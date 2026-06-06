@@ -14,14 +14,28 @@ const WINDOWS = [
 ];
 
 /** Série sélectionnée : on stocke l'INDEX de couleur (pas la couleur figée), pour
- *  que la teinte soit résolue dans la palette du thème courant au rendu. L'axe est
- *  désormais déduit automatiquement de l'unité (cf. MultiChart). */
+ *  que la teinte soit résolue dans la palette du thème courant au rendu. `axis`
+ *  = côté/échelle (gauche/droite), avec un défaut intelligent par unité. */
 type Selected = {
   tag: string;
   label: string;
   unit?: string | null;
   idx: number;
+  axis: "left" | "right";
 };
+
+/** Côté par défaut d'une nouvelle série : même unité qu'un côté existant -> ce
+ *  côté ; sinon le côté encore libre ; sinon la gauche. (Forçable à la main.) */
+function defaultSide(cur: Selected[], unit: string | null): "left" | "right" {
+  const sideUnits = (side: "left" | "right") =>
+    new Set(cur.filter((s) => s.axis === side).map((s) => s.unit ?? null));
+  if (sideUnits("left").has(unit)) return "left";
+  if (sideUnits("right").has(unit)) return "right";
+  const hasLeft = cur.some((s) => s.axis === "left");
+  const hasRight = cur.some((s) => s.axis === "right");
+  if (hasLeft && !hasRight) return "right";
+  return "left";
+}
 
 export function LiveView() {
   const [tags, setTags] = useState<Tag[]>([]);
@@ -45,6 +59,7 @@ export function LiveView() {
         label: s.label,
         color: colorOf(s.idx),
         unit: s.unit,
+        axis: s.axis,
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [selected, palette],
@@ -111,10 +126,11 @@ export function LiveView() {
         clear(t.name);
         return cur.filter((s) => s.tag !== t.name);
       }
+      const axis = defaultSide(cur, t.unit ?? null);
       loadHistory(t.name, windowSec);
       return [
         ...cur,
-        { tag: t.name, label: tagLabel(t), idx: cur.length, unit: t.unit },
+        { tag: t.name, label: tagLabel(t), idx: cur.length, unit: t.unit, axis },
       ];
     });
   };
@@ -126,6 +142,9 @@ export function LiveView() {
     for (const s of selected) loadHistory(s.tag, windowSec);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [windowSec]);
+
+  const setAxis = (tag: string, axis: "left" | "right") =>
+    setSelected((cur) => cur.map((s) => (s.tag === tag ? { ...s, axis } : s)));
 
   const removeAll = () => {
     clear();
@@ -196,6 +215,13 @@ export function LiveView() {
                   {latest[i] == null ? "—" : latest[i]!.toFixed(2)}
                   {s.unit ? ` ${s.unit}` : ""}
                 </span>
+                <button
+                  className={`axis-toggle ${s.axis}`}
+                  title="Basculer l'axe (gauche/droite)"
+                  onClick={() => setAxis(s.tag, s.axis === "left" ? "right" : "left")}
+                >
+                  {s.axis === "left" ? "G" : "D"}
+                </button>
                 <button
                   className="x"
                   onClick={() => toggleTag({ name: s.tag } as Tag)}
