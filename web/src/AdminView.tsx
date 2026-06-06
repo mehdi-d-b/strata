@@ -188,7 +188,7 @@ function RolesSection() {
           {role.description && <p className="hint">{role.description}</p>}
           <div className="chips">
             {role.grants.length === 0 && (
-              <span style={{ color: "#8b97a7" }}>aucun droit</span>
+              <span style={{ color: "var(--muted-foreground)" }}>aucun droit</span>
             )}
             {role.grants.map((g, i) => (
               <span key={i} className={`grant grant-${g.action}`}>
@@ -241,7 +241,7 @@ function AuditSection() {
           ))}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={4} style={{ color: "#8b97a7" }}>
+              <td colSpan={4} style={{ color: "var(--muted-foreground)" }}>
                 Aucune entrée.
               </td>
             </tr>

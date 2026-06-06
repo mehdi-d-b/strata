@@ -99,7 +99,7 @@ export function TagsView() {
           ))}
           {tags.length === 0 && (
             <tr>
-              <td colSpan={7} style={{ color: "#8b97a7" }}>
+              <td colSpan={7} style={{ color: "var(--muted-foreground)" }}>
                 Aucun tag pour l'instant. Les tags apparaissent automatiquement
                 dès que des données arrivent.
               </td>

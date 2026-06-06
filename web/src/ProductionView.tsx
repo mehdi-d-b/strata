@@ -84,7 +84,7 @@ export function ProductionView() {
                 <td>{r.day.slice(0, 10)}</td>
                 <td>{r.shift_label ?? `#${r.shift_no}`}</td>
                 <td>{r.ok ?? "—"}</td>
-                <td style={{ color: r.scrap ? "#f0883e" : undefined }}>
+                <td style={{ color: r.scrap ? "var(--warn)" : undefined }}>
                   {r.scrap ?? "—"}
                 </td>
                 <td>{r.produced ?? "—"}</td>
@@ -94,7 +94,7 @@ export function ProductionView() {
             ))}
             {prod.length === 0 && (
               <tr>
-                <td colSpan={7} style={{ color: "#8b97a7" }}>
+                <td colSpan={7} style={{ color: "var(--muted-foreground)" }}>
                   Aucune production calculée. Mappe des tags compteurs à des rôles
                   ci-dessous (OK / rebut…).
                 </td>

@@ -223,7 +223,7 @@ function DeviceDetail({ device, onChange }: { device: string; onChange: () => vo
           ))}
           {tags.length === 0 && (
             <tr>
-              <td colSpan={4} style={{ color: "#8b97a7" }}>
+              <td colSpan={4} style={{ color: "var(--muted-foreground)" }}>
                 Aucun tag. Ajoute-en un ou importe un CSV.
               </td>
             </tr>

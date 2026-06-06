@@ -2,6 +2,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "./auth";
 import { userIsAdmin } from "./api";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "./theme";
 
 /** Coquille de l'application : en-tête + navigation + zone de contenu (Outlet). */
 export function Layout() {
@@ -47,6 +48,7 @@ export function Layout() {
         </nav>
         <div className="user-box">
           <span className="user-name">{user?.display_name ?? user?.username}</span>
+          <ThemeToggle />
           <Button variant="outline" size="sm" onClick={() => logout()}>
             Déconnexion
           </Button>

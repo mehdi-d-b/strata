@@ -1,17 +1,17 @@
 :root {
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  color-scheme: dark;
 }
 
 body {
   margin: 0;
-  background: #0e1116;
-  color: #e6edf3;
+  /* Fond/texte pilotés par les tokens (suivent le toggle clair/sombre). */
+  background: var(--background);
+  color: var(--foreground);
 }
 
 header {
   padding: 16px 24px;
-  border-bottom: 1px solid #222a35;
+  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -25,7 +25,7 @@ header h1 {
 
 header .sub {
   font-size: 12px;
-  color: #8b97a7;
+  color: var(--muted-foreground);
 }
 
 nav {
@@ -37,7 +37,7 @@ nav button,
 nav a {
   background: transparent;
   border: 1px solid transparent;
-  color: #8b97a7;
+  color: var(--muted-foreground);
   padding: 6px 14px;
   border-radius: 6px;
   cursor: pointer;
@@ -47,9 +47,9 @@ nav a {
 
 nav button.active,
 nav a.active {
-  background: #161b22;
-  border-color: #2d3645;
-  color: #e6edf3;
+  background: var(--secondary);
+  border-color: var(--border);
+  color: var(--foreground);
 }
 
 main {
@@ -68,8 +68,8 @@ main {
 }
 
 .tag-picker {
-  background: #11161d;
-  border: 1px solid #1d242e;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px;
   position: sticky;
@@ -81,9 +81,9 @@ main {
 }
 
 .tag-search {
-  background: #0e1116;
-  color: #e6edf3;
-  border: 1px solid #2d3645;
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 8px 10px;
   font-size: 13px;
@@ -104,15 +104,15 @@ main {
   border-radius: 6px;
   cursor: pointer;
   font-size: 13px;
-  color: #c9d1d9;
+  color: var(--foreground);
 }
 
 .tag-item:hover {
-  background: #161b22;
+  background: var(--secondary);
 }
 
 .tag-item.on {
-  background: #11202e;
+  background: var(--accent);
 }
 
 .tag-item-label {
@@ -123,7 +123,7 @@ main {
 }
 
 .tag-item-unit {
-  color: #8b97a7;
+  color: var(--muted-foreground);
   font-size: 11px;
 }
 
@@ -143,7 +143,7 @@ main {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #8b97a7;
+  color: var(--muted-foreground);
   font-size: 14px;
 }
 
@@ -158,12 +158,12 @@ main {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: #11161d;
-  border: 1px solid #1d242e;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 999px;
   padding: 4px 6px 4px 10px;
   font-size: 12px;
-  color: #e6edf3;
+  color: var(--foreground);
 }
 
 .series-chip .dot {
@@ -180,9 +180,9 @@ main {
 }
 
 .axis-toggle {
-  background: #0e1116;
-  border: 1px solid #2d3645;
-  color: #8b97a7;
+  background: var(--background);
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
   border-radius: 5px;
   padding: 2px 6px;
   font-size: 11px;
@@ -190,14 +190,14 @@ main {
 }
 
 .axis-toggle.right {
-  color: #58a6ff;
-  border-color: #1f4d7a;
+  color: var(--chart-2);
+  border-color: color-mix(in srgb, var(--chart-2) 45%, transparent);
 }
 
 .series-chip .x {
   background: transparent;
   border: none;
-  color: #f85149;
+  color: var(--bad);
   cursor: pointer;
   font-size: 12px;
   padding: 0 4px;
@@ -216,24 +216,24 @@ main {
   flex-direction: column;
   gap: 5px;
   font-size: 13px;
-  color: #8b97a7;
+  color: var(--muted-foreground);
 }
 
 .field input,
 .field select {
-  background: #0e1116;
-  color: #e6edf3;
-  border: 1px solid #2d3645;
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 8px 10px;
   font-size: 14px;
 }
 
 .ok-text {
-  color: #3fb950;
+  color: var(--good);
 }
 .err-text {
-  color: #f85149;
+  color: var(--bad);
 }
 
 /* ─── Accueil : KPIs ───────────────────────────────────────────── */
@@ -248,27 +248,28 @@ main {
 }
 
 .kpi-label {
-  color: #8b97a7;
+  color: var(--muted-foreground);
   font-size: 13px;
   margin-bottom: 8px;
 }
 
 .kpi-value {
-  color: #e6edf3;
+  color: var(--foreground);
   font-size: 30px;
   font-weight: 600;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 
 .kpi-value.green {
-  color: #3fb950;
+  color: var(--good);
 }
 .kpi-value.amber {
-  color: #f0883e;
+  color: var(--warn);
 }
 
 .kpi-hint {
-  color: #8b97a7;
+  color: var(--muted-foreground);
   font-size: 12px;
   margin-top: 8px;
 }
@@ -282,8 +283,8 @@ main {
 
 .home-card {
   display: block;
-  background: #11161d;
-  border: 1px solid #1d242e;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 20px;
   text-decoration: none;
@@ -291,19 +292,19 @@ main {
 }
 
 .home-card:hover {
-  border-color: #3fb950;
+  border-color: var(--good);
   transform: translateY(-2px);
 }
 
 .home-card-title {
-  color: #e6edf3;
+  color: var(--foreground);
   font-size: 16px;
   font-weight: 600;
   margin-bottom: 6px;
 }
 
 .home-card-sub {
-  color: #8b97a7;
+  color: var(--muted-foreground);
   font-size: 13px;
 }
 
@@ -314,17 +315,17 @@ main {
 }
 
 select {
-  background: #161b22;
-  color: #e6edf3;
-  border: 1px solid #2d3645;
+  background: var(--secondary);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 6px 10px;
   font-size: 14px;
 }
 
 .card {
-  background: #11161d;
-  border: 1px solid #1d242e;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 16px;
 }
@@ -336,13 +337,13 @@ select {
 }
 
 .status.live {
-  background: #103a24;
-  color: #3fb950;
+  background: color-mix(in srgb, var(--good) 18%, transparent);
+  color: var(--good);
 }
 
 .status.off {
-  background: #3a1d1d;
-  color: #f85149;
+  background: color-mix(in srgb, var(--bad) 18%, transparent);
+  color: var(--bad);
 }
 
 /* Sélecteur de plage temporelle */
@@ -352,9 +353,9 @@ select {
 }
 
 .range button {
-  background: #161b22;
-  color: #8b97a7;
-  border: 1px solid #2d3645;
+  background: var(--secondary);
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 6px 10px;
   font-size: 13px;
@@ -362,9 +363,9 @@ select {
 }
 
 .range button.active {
-  background: #103a24;
-  border-color: #1f6f3f;
-  color: #3fb950;
+  background: color-mix(in srgb, var(--good) 18%, transparent);
+  border-color: color-mix(in srgb, var(--good) 45%, transparent);
+  color: var(--good);
 }
 
 /* Tableau de configuration des tags */
@@ -376,26 +377,26 @@ table.tags {
 
 table.tags th {
   text-align: left;
-  color: #8b97a7;
+  color: var(--muted-foreground);
   font-weight: 500;
   padding: 8px 10px;
-  border-bottom: 1px solid #222a35;
+  border-bottom: 1px solid var(--border);
 }
 
 table.tags td {
   padding: 6px 10px;
-  border-bottom: 1px solid #161b22;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
 }
 
 table.tags code {
-  color: #58a6ff;
+  color: var(--chart-2);
 }
 
 table.tags input[type="text"],
 table.tags input:not([type]) {
-  background: #0e1116;
-  color: #e6edf3;
-  border: 1px solid #2d3645;
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 5px;
   padding: 5px 8px;
   width: 100%;
@@ -407,9 +408,9 @@ table.tags input.narrow {
 }
 
 table.tags button {
-  background: #161b22;
-  color: #e6edf3;
-  border: 1px solid #2d3645;
+  background: var(--secondary);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 5px;
   padding: 5px 10px;
   font-size: 13px;
@@ -418,18 +419,18 @@ table.tags button {
 }
 
 table.tags button.ghost {
-  color: #f85149;
-  border-color: #3a1d1d;
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 40%, transparent);
 }
 
 .hint {
-  color: #8b97a7;
+  color: var(--muted-foreground);
   font-size: 12px;
   margin-top: 12px;
 }
 
 .hint code {
-  color: #c9d1d9;
+  color: var(--foreground);
 }
 
 .card-title {
@@ -442,9 +443,9 @@ table.tags button.ghost {
 }
 
 .card-title button.add {
-  background: #103a24;
-  color: #3fb950;
-  border: 1px solid #1f6f3f;
+  background: color-mix(in srgb, var(--good) 18%, transparent);
+  color: var(--good);
+  border: 1px solid color-mix(in srgb, var(--good) 45%, transparent);
   border-radius: 6px;
   padding: 4px 10px;
   font-size: 13px;
@@ -452,18 +453,18 @@ table.tags button.ghost {
 }
 
 table.tags select {
-  background: #0e1116;
-  color: #e6edf3;
-  border: 1px solid #2d3645;
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 5px;
   padding: 5px 8px;
 }
 
 table.tags input[type="date"],
 table.tags input[type="time"] {
-  background: #0e1116;
-  color: #e6edf3;
-  border: 1px solid #2d3645;
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 5px;
   padding: 4px 6px;
 }
@@ -474,12 +475,12 @@ table.tags input[type="time"] {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #8b97a7;
+  color: var(--muted-foreground);
 }
 
 .login-card {
-  background: #11161d;
-  border: 1px solid #1d242e;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 32px;
   width: 320px;
@@ -492,7 +493,7 @@ table.tags input[type="time"] {
   margin: 0;
   font-size: 22px;
   letter-spacing: 2px;
-  color: #e6edf3;
+  color: var(--foreground);
 }
 
 .login-card .sub {
@@ -505,13 +506,13 @@ table.tags input[type="time"] {
   flex-direction: column;
   gap: 5px;
   font-size: 13px;
-  color: #8b97a7;
+  color: var(--muted-foreground);
 }
 
 .login-card input {
-  background: #0e1116;
-  color: #e6edf3;
-  border: 1px solid #2d3645;
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 9px 11px;
   font-size: 14px;
@@ -519,8 +520,8 @@ table.tags input[type="time"] {
 
 .login-card button[type="submit"] {
   margin-top: 6px;
-  background: #1f6f3f;
-  color: #fff;
+  background: var(--primary);
+  color: var(--primary-foreground);
   border: none;
   border-radius: 6px;
   padding: 10px;
@@ -534,8 +535,8 @@ table.tags input[type="time"] {
 }
 
 .login-error {
-  background: #3a1d1d;
-  color: #f85149;
+  background: color-mix(in srgb, var(--bad) 18%, transparent);
+  color: var(--bad);
   border-radius: 6px;
   padding: 8px 10px;
   font-size: 13px;
@@ -550,14 +551,14 @@ table.tags input[type="time"] {
 }
 
 .user-name {
-  color: #e6edf3;
+  color: var(--foreground);
 }
 
 .user-box .ghost,
 header .ghost {
   background: transparent;
-  border: 1px solid #2d3645;
-  color: #8b97a7;
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
   border-radius: 6px;
   padding: 5px 10px;
   cursor: pointer;
@@ -571,9 +572,9 @@ header .ghost {
 }
 
 .subnav button {
-  background: #161b22;
-  color: #8b97a7;
-  border: 1px solid #2d3645;
+  background: var(--secondary);
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 6px 12px;
   font-size: 13px;
@@ -581,9 +582,9 @@ header .ghost {
 }
 
 .subnav button.active {
-  background: #11161d;
-  color: #e6edf3;
-  border-color: #3fb950;
+  background: var(--card);
+  color: var(--foreground);
+  border-color: var(--good);
 }
 
 .chips {
@@ -593,9 +594,9 @@ header .ghost {
 }
 
 .chip {
-  background: #0e1116;
-  color: #8b97a7;
-  border: 1px solid #2d3645;
+  background: var(--background);
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
   border-radius: 999px;
   padding: 3px 11px;
   font-size: 12px;
@@ -603,34 +604,34 @@ header .ghost {
 }
 
 .chip.on {
-  background: #103a24;
-  color: #3fb950;
-  border-color: #1f6f3f;
+  background: color-mix(in srgb, var(--good) 18%, transparent);
+  color: var(--good);
+  border-color: color-mix(in srgb, var(--good) 45%, transparent);
 }
 
 .grant {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: #0e1116;
-  border: 1px solid #2d3645;
+  background: var(--background);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 4px 8px;
   font-size: 12px;
-  color: #c9d1d9;
+  color: var(--foreground);
 }
 
 .grant-write {
-  border-color: #1f6f3f;
+  border-color: color-mix(in srgb, var(--good) 50%, transparent);
 }
 .grant-admin {
-  border-color: #8957e5;
+  border-color: color-mix(in srgb, var(--chart-4) 50%, transparent);
 }
 
 .grant .x {
   background: transparent;
   border: none;
-  color: #f85149;
+  color: var(--bad);
   cursor: pointer;
   font-size: 12px;
   padding: 0;
@@ -643,9 +644,9 @@ header .ghost {
 }
 
 .newrow input {
-  background: #0e1116;
-  color: #e6edf3;
-  border: 1px solid #2d3645;
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 7px 10px;
   font-size: 13px;
@@ -658,18 +659,18 @@ header .ghost {
   gap: 8px;
   margin-top: 16px;
   padding-top: 14px;
-  border-top: 1px solid #1d242e;
+  border-top: 1px solid var(--border);
   font-size: 13px;
 }
 
 .cmdbox-label {
-  color: #8b97a7;
+  color: var(--muted-foreground);
 }
 
 .cmdbox input {
-  background: #0e1116;
-  color: #e6edf3;
-  border: 1px solid #2d3645;
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 7px 10px;
   width: 120px;
@@ -677,11 +678,11 @@ header .ghost {
 }
 
 .cmdbox-unit {
-  color: #8b97a7;
+  color: var(--muted-foreground);
 }
 
 .cmdbox button {
-  background: #8957e5;
+  background: var(--chart-4);
   color: #fff;
   border: none;
   border-radius: 6px;
@@ -696,17 +697,17 @@ header .ghost {
 }
 
 .cmdbox-msg.ok {
-  color: #3fb950;
+  color: var(--good);
 }
 .cmdbox-msg.err {
-  color: #f85149;
+  color: var(--bad);
 }
 
 /* ─── Automates (gestion des tags) ─────────────────────────────── */
 .linkish {
   background: transparent;
   border: none;
-  color: #58a6ff;
+  color: var(--chart-2);
   cursor: pointer;
   font-size: 14px;
   padding: 0;
@@ -714,13 +715,13 @@ header .ghost {
 }
 
 tr.row-selected {
-  background: #11202e;
+  background: var(--accent);
 }
 
 .newrow select {
-  background: #0e1116;
-  color: #e6edf3;
-  border: 1px solid #2d3645;
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 7px 10px;
   font-size: 13px;
@@ -729,9 +730,9 @@ tr.row-selected {
 textarea.csv {
   width: 100%;
   box-sizing: border-box;
-  background: #0e1116;
-  color: #e6edf3;
-  border: 1px solid #2d3645;
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 9px 11px;
   font-family: ui-monospace, monospace;

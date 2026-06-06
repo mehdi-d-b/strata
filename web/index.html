@@ -7,6 +7,17 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Applique le thème persistant avant le rendu (évite le flash clair/sombre).
+      (function () {
+        try {
+          var t = localStorage.getItem("strata-theme");
+          if (t !== "light" && t !== "dark") t = "dark";
+          document.documentElement.classList.toggle("dark", t === "dark");
+          document.documentElement.style.colorScheme = t;
+        } catch (e) {}
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
