@@ -102,8 +102,19 @@ Architecture **cerveau / faces** conçue pour accueillir les vraies faces en P6 
 ## Phase 9 — Plus si affinité
 - [ ] RisingWave : streams dérivés temps réel, alarmes
 - [ ] SCADA / synoptiques, alarming
-- [ ] IA / détection d'anomalies
 - [ ] OEE complet (dispo × perf × qualité)
+- [ ] **Prévision de séries — TimesFM** (Google). Service Python séparé : lit l'historique
+      (`/api/history` ou Timescale en lecture), réinjecte les prévisions comme tags
+      `source: forecast` (ex `...temperature.forecast`) → absorbés par le contrat `tags.raw`,
+      affichés à côté du réel. Aucune refonte. Lourd (modèle de fondation JAX), inférence batch.
+- [ ] **Assistant IA (LLM local + RAG + MCP)** — *pluggable sans refonte* grâce aux contrats
+      stables (topic `tags.raw`, API REST, RBAC). Principe clé : l'IA est **un utilisateur de
+      plus** → un serveur MCP « Strata » expose des tools qui appellent l'API gateway existante
+      (`/api/history`, `/api/production`, `/api/command`), donc RBAC + audit s'appliquent
+      gratuitement. RAG sur docs internes = brique orthogonale (vector store). LLM local
+      (Ollama/vLLM) = container de plus, sans JVM.
+      ⚠️ Règle d'or : l'IA passe TOUJOURS par l'API, jamais d'accès direct à la base (sinon on
+      perd auth/RBAC/audit).
 
 ## Dette technique & durcissement « prod »
 Choix assumés de la phase démo : rien de bloquant en local, mais à traiter avant un vrai
