@@ -1,62 +1,18 @@
-import { NavLink, Outlet } from "react-router-dom";
-import { useAuth } from "./auth";
-import { userIsAdmin } from "./api";
-import { Button } from "@/components/ui/button";
-import { ThemeToggle } from "./theme";
+import { Outlet } from "react-router-dom";
+import { Sidebar } from "@/components/Sidebar";
+import { Toaster } from "@/components/ui/sonner";
 
-/** Coquille de l'application : en-tête + navigation + zone de contenu (Outlet). */
+/** Coquille de l'application : sidebar de navigation + zone de contenu (Outlet). */
 export function Layout() {
-  const { user, logout } = useAuth();
-  const admin = userIsAdmin(user);
-
-  const navClass = ({ isActive }: { isActive: boolean }) =>
-    isActive ? "active" : "";
-
   return (
-    <>
-      <header>
-        <div>
-          <h1>STRATA</h1>
-          <div className="sub">Industrial data streaming</div>
-        </div>
-        <nav>
-          <NavLink to="/" end className={navClass}>
-            Accueil
-          </NavLink>
-          <NavLink to="/live" className={navClass}>
-            Temps réel
-          </NavLink>
-          <NavLink to="/production" className={navClass}>
-            Production
-          </NavLink>
-          <NavLink to="/tags" className={navClass}>
-            Tags
-          </NavLink>
-          {admin && (
-            <NavLink to="/devices" className={navClass}>
-              Automates
-            </NavLink>
-          )}
-          {admin && (
-            <NavLink to="/admin" className={navClass}>
-              Admin
-            </NavLink>
-          )}
-          <NavLink to="/settings" className={navClass}>
-            Paramètres
-          </NavLink>
-        </nav>
-        <div className="user-box">
-          <span className="user-name">{user?.display_name ?? user?.username}</span>
-          <ThemeToggle />
-          <Button variant="outline" size="sm" onClick={() => logout()}>
-            Déconnexion
-          </Button>
-        </div>
-      </header>
-      <main>
-        <Outlet />
-      </main>
-    </>
+    <div className="flex min-h-screen bg-background">
+      <Sidebar />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <main>
+          <Outlet />
+        </main>
+      </div>
+      <Toaster />
+    </div>
   );
 }
