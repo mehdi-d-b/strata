@@ -9,10 +9,6 @@ body {
   color: var(--foreground);
 }
 
-/* L'ancien bandeau horizontal (header + nav global) a été remplacé par la
-   sidebar (components/Sidebar.tsx). Ses règles globales sont supprimées : elles
-   écrasaient le layout de la sidebar (nav { display:flex } la mettait en ligne). */
-
 main {
   padding: 24px;
   display: flex;
@@ -20,7 +16,35 @@ main {
   gap: 24px;
 }
 
-/* ─── Temps réel avancé : layout 2 colonnes ────────────────────── */
+/* Select natif (rôles, protocole, fenêtre…) calé sur les tokens. */
+select {
+  background: var(--secondary);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 14px;
+}
+
+/* Carte générique (conteneur de graphe / consigne dans l'Explorer). */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.hint {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  margin-top: 12px;
+}
+
+.hint code {
+  color: var(--foreground);
+}
+
+/* ─── Explorer : layout 2 colonnes ─────────────────────────────── */
 .live-layout {
   display: grid;
   grid-template-columns: 280px 1fr;
@@ -189,133 +213,13 @@ main {
   padding: 0 4px;
 }
 
-/* ─── Paramètres : formulaires ─────────────────────────────────── */
-.form-col {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  max-width: 360px;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  font-size: 13px;
-  color: var(--muted-foreground);
-}
-
-.field input,
-.field select {
-  background: var(--background);
-  color: var(--foreground);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px 10px;
-  font-size: 14px;
-}
-
-.ok-text {
-  color: var(--good);
-}
-.err-text {
-  color: var(--bad);
-}
-
-/* ─── Accueil : KPIs ───────────────────────────────────────────── */
-.kpi-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 16px;
-}
-
-.kpi {
-  padding: 18px 20px;
-}
-
-.kpi-label {
-  color: var(--muted-foreground);
-  font-size: 13px;
-  margin-bottom: 8px;
-}
-
-.kpi-value {
-  color: var(--foreground);
-  font-size: 30px;
-  font-weight: 600;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-
-.kpi-value.green {
-  color: var(--good);
-}
-.kpi-value.amber {
-  color: var(--warn);
-}
-
-.kpi-hint {
-  color: var(--muted-foreground);
-  font-size: 12px;
-  margin-top: 8px;
-}
-
-/* ─── Accueil : grille de raccourcis ───────────────────────────── */
-.home-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 16px;
-}
-
-.home-card {
-  display: block;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 20px;
-  text-decoration: none;
-  transition: border-color 0.15s, transform 0.15s;
-}
-
-.home-card:hover {
-  border-color: var(--good);
-  transform: translateY(-2px);
-}
-
-.home-card-title {
-  color: var(--foreground);
-  font-size: 16px;
-  font-weight: 600;
-  margin-bottom: 6px;
-}
-
-.home-card-sub {
-  color: var(--muted-foreground);
-  font-size: 13px;
-}
-
 .toolbar {
   display: flex;
   gap: 12px;
   align-items: center;
 }
 
-select {
-  background: var(--secondary);
-  color: var(--foreground);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 10px;
-  font-size: 14px;
-}
-
-.card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 16px;
-}
-
+/* ─── Explorer : badge d'état ──────────────────────────────────── */
 .status {
   font-size: 12px;
   padding: 2px 8px;
@@ -366,7 +270,7 @@ select {
   font-size: 13px;
 }
 
-/* Sélecteur de plage temporelle */
+/* Sélecteur de plage relative (presets) */
 .range {
   display: flex;
   gap: 4px;
@@ -388,291 +292,7 @@ select {
   color: var(--good);
 }
 
-/* Tableau de configuration des tags */
-table.tags {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 14px;
-}
-
-table.tags th {
-  text-align: left;
-  color: var(--muted-foreground);
-  font-weight: 500;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
-}
-
-table.tags td {
-  padding: 6px 10px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
-}
-
-table.tags code {
-  color: var(--chart-2);
-}
-
-table.tags input[type="text"],
-table.tags input:not([type]) {
-  background: var(--background);
-  color: var(--foreground);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 5px 8px;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-table.tags input.narrow {
-  width: 90px;
-}
-
-table.tags button {
-  background: var(--secondary);
-  color: var(--foreground);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 5px 10px;
-  font-size: 13px;
-  cursor: pointer;
-  margin-right: 4px;
-}
-
-table.tags button.ghost {
-  color: var(--bad);
-  border-color: color-mix(in srgb, var(--bad) 40%, transparent);
-}
-
-.hint {
-  color: var(--muted-foreground);
-  font-size: 12px;
-  margin-top: 12px;
-}
-
-.hint code {
-  color: var(--foreground);
-}
-
-.card-title {
-  margin: 0 0 14px;
-  font-size: 15px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.card-title button.add {
-  background: color-mix(in srgb, var(--good) 18%, transparent);
-  color: var(--good);
-  border: 1px solid color-mix(in srgb, var(--good) 45%, transparent);
-  border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-table.tags select {
-  background: var(--background);
-  color: var(--foreground);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 5px 8px;
-}
-
-table.tags input[type="date"],
-table.tags input[type="time"] {
-  background: var(--background);
-  color: var(--foreground);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 4px 6px;
-}
-
-/* ─── Auth : login ─────────────────────────────────────────────── */
-.login-wrap {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--muted-foreground);
-}
-
-.login-card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 32px;
-  width: 320px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.login-card h1 {
-  margin: 0;
-  font-size: 22px;
-  letter-spacing: 2px;
-  color: var(--foreground);
-}
-
-.login-card .sub {
-  font-size: 13px;
-  margin-top: -8px;
-}
-
-.login-card label {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  font-size: 13px;
-  color: var(--muted-foreground);
-}
-
-.login-card input {
-  background: var(--background);
-  color: var(--foreground);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 9px 11px;
-  font-size: 14px;
-}
-
-.login-card button[type="submit"] {
-  margin-top: 6px;
-  background: var(--primary);
-  color: var(--primary-foreground);
-  border: none;
-  border-radius: 6px;
-  padding: 10px;
-  font-size: 14px;
-  cursor: pointer;
-}
-
-.login-card button[type="submit"]:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.login-error {
-  background: color-mix(in srgb, var(--bad) 18%, transparent);
-  color: var(--bad);
-  border-radius: 6px;
-  padding: 8px 10px;
-  font-size: 13px;
-}
-
-/* ─── Header : boîte utilisateur ───────────────────────────────── */
-.user-box {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-}
-
-.user-name {
-  color: var(--foreground);
-}
-
-.user-box .ghost,
-header .ghost {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--muted-foreground);
-  border-radius: 6px;
-  padding: 5px 10px;
-  cursor: pointer;
-  font-size: 13px;
-}
-
-/* ─── Admin : sous-navigation, chips, grants ───────────────────── */
-.subnav {
-  display: flex;
-  gap: 8px;
-}
-
-.subnav button {
-  background: var(--secondary);
-  color: var(--muted-foreground);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 12px;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.subnav button.active {
-  background: var(--card);
-  color: var(--foreground);
-  border-color: var(--good);
-}
-
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.chip {
-  background: var(--background);
-  color: var(--muted-foreground);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 3px 11px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.chip.on {
-  background: color-mix(in srgb, var(--good) 18%, transparent);
-  color: var(--good);
-  border-color: color-mix(in srgb, var(--good) 45%, transparent);
-}
-
-.grant {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--background);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 8px;
-  font-size: 12px;
-  color: var(--foreground);
-}
-
-.grant-write {
-  border-color: color-mix(in srgb, var(--good) 50%, transparent);
-}
-.grant-admin {
-  border-color: color-mix(in srgb, var(--chart-4) 50%, transparent);
-}
-
-.grant .x {
-  background: transparent;
-  border: none;
-  color: var(--bad);
-  cursor: pointer;
-  font-size: 12px;
-  padding: 0;
-}
-
-.newrow {
-  display: flex;
-  gap: 8px;
-  margin-top: 14px;
-}
-
-.newrow input {
-  background: var(--background);
-  color: var(--foreground);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 7px 10px;
-  font-size: 13px;
-}
-
-/* ─── Écriture de consigne (Phase 8) ───────────────────────────── */
+/* ─── Écriture de consigne (CommandBox) ────────────────────────── */
 .cmdbox {
   display: flex;
   align-items: center;
@@ -721,43 +341,6 @@ header .ghost {
 }
 .cmdbox-msg.err {
   color: var(--bad);
-}
-
-/* ─── Automates (gestion des tags) ─────────────────────────────── */
-.linkish {
-  background: transparent;
-  border: none;
-  color: var(--chart-2);
-  cursor: pointer;
-  font-size: 14px;
-  padding: 0;
-  text-decoration: underline;
-}
-
-tr.row-selected {
-  background: var(--accent);
-}
-
-.newrow select {
-  background: var(--background);
-  color: var(--foreground);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 7px 10px;
-  font-size: 13px;
-}
-
-textarea.csv {
-  width: 100%;
-  box-sizing: border-box;
-  background: var(--background);
-  color: var(--foreground);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 9px 11px;
-  font-family: ui-monospace, monospace;
-  font-size: 13px;
-  resize: vertical;
 }
 
 /* ─── uPlot : DOM (titre + légende) aligné sur les tokens ───────── */
