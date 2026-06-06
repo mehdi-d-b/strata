@@ -1,19 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type uPlot from "uplot";
-import { Download, Pause, Play, RotateCcw } from "lucide-react";
+import { Calendar, Download, Pause, Play, RotateCcw } from "lucide-react";
 import { MultiChart, type ChartApi, type SeriesDef } from "./MultiChart";
 import { useRealtimeBuffers } from "./useRealtimeBuffers";
 import { CommandBox } from "./CommandBox";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "./theme";
 import { chartPalette } from "./chartTheme";
-import { fetchHistory, fetchTags, tagLabel, type Tag } from "./api";
+import {
+  fetchHistory,
+  fetchHistoryRange,
+  fetchTags,
+  tagLabel,
+  type Tag,
+} from "./api";
 
 const WINDOWS = [
   { label: "5 min", sec: 300 },
   { label: "15 min", sec: 900 },
   { label: "60 min", sec: 3600 },
 ];
+
+/** Plage affichée : relative (suit le direct) ou absolue (historique daté). */
+type Range =
+  | { mode: "relative"; sec: number }
+  | { mode: "absolute"; from: string; to: string };
 
 /** Série sélectionnée : on stocke l'INDEX de couleur (pas la couleur figée), pour
  *  que la teinte soit résolue dans la palette du thème courant au rendu. `axis`
@@ -40,27 +51,49 @@ function defaultSide(cur: Selected[], unit: string | null): "left" | "right" {
   return "left";
 }
 
+/** Date -> valeur d'un <input type="datetime-local"> (heure locale). */
+function toLocalInput(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+    d.getHours(),
+  )}:${pad(d.getMinutes())}`;
+}
+
 export function LiveView() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Selected[]>([]);
-  const [windowSec, setWindowSec] = useState(300);
+  const [range, setRange] = useState<Range>({ mode: "relative", sec: 300 });
   const [live, setLive] = useState(false);
   const [paused, setPaused] = useState(false);
 
   const [data, setData] = useState<uPlot.AlignedData>([[]]);
 
-  // Pause du live : on gèle l'arrivée des frames (les buffers continuent de
-  // tourner ; à la reprise, on saute à l'instant présent).
+  const isLive = range.mode === "relative";
+  const liveSec = range.mode === "relative" ? range.sec : 300;
+
+  // Picker de plage absolue.
+  const [showRange, setShowRange] = useState(false);
+  const [absFrom, setAbsFrom] = useState(() =>
+    toLocalInput(new Date(Date.now() - 3600_000)),
+  );
+  const [absTo, setAbsTo] = useState(() => toLocalInput(new Date()));
+
+  // Refs pour les guards dans la boucle de frames (sans recréer la socket).
   const pausedRef = useRef(false);
   pausedRef.current = paused;
+  const isLiveRef = useRef(isLive);
+  isLiveRef.current = isLive;
+
+  // En direct : on pousse les frames (sauf pause). En historique : on les ignore
+  // (les données viennent du chargement de plage absolue).
   const handleFrame = useCallback((d: uPlot.AlignedData) => {
-    if (!pausedRef.current) setData(d);
+    if (isLiveRef.current && !pausedRef.current) setData(d);
   }, []);
 
   // Le zoom au glisser met en pause (sinon la frame suivante annule le zoom).
-  // On force le ref tout de suite pour qu'aucune frame ne passe avant le re-render.
   const onUserZoom = useCallback(() => {
+    if (!isLiveRef.current) return; // en historique, rien à mettre en pause
     pausedRef.current = true;
     setPaused(true);
   }, []);
@@ -88,7 +121,7 @@ export function LiveView() {
     [selected, palette],
   );
 
-  // Dernière valeur connue par série (pour l'afficher en direct dans les chips).
+  // Dernière valeur connue par série (pour l'afficher dans les chips).
   const latest = useMemo<(number | null)[]>(
     () =>
       selected.map((_, i) => {
@@ -118,20 +151,20 @@ export function LiveView() {
 
   const selectedTags = useMemo(() => selected.map((s) => s.tag), [selected]);
 
-  // 2) Flux temps réel découplé (buffers + redraw cadencé).
+  // 2) Flux temps réel découplé (buffers + redraw cadencé). Toujours connecté ;
+  //    les frames ne sont appliquées qu'en mode direct (cf. handleFrame).
   const { clear, seed } = useRealtimeBuffers({
     tags: selectedTags,
-    windowSec,
+    windowSec: liveSec,
     fps: 30,
     onFrame: handleFrame,
     onLive: setLive,
   });
 
-  // Pour des callbacks stables (sans recréer la socket).
   const seedRef = useRef(seed);
   seedRef.current = seed;
 
-  // Amorce/recharge le buffer d'un tag avec l'historique couvrant la fenêtre.
+  // Amorce/recharge le buffer d'un tag avec l'historique couvrant la fenêtre (direct).
   const loadHistory = (tag: string, sec: number) =>
     fetchHistory(tag, Math.ceil(sec / 60)).then((rows) => {
       seedRef.current(
@@ -141,7 +174,44 @@ export function LiveView() {
       );
     });
 
-  // 3) (Dé)sélection d'un tag : amorce l'historique au moment où on l'ajoute.
+  // Charge une plage absolue pour toutes les séries et compose l'AlignedData.
+  const loadAbsolute = useCallback(
+    async (from: string, to: string, list: Selected[]) => {
+      if (list.length === 0) {
+        setData([[]]);
+        return;
+      }
+      const fromIso = new Date(from).toISOString();
+      const toIso = new Date(to).toISOString();
+      const results = await Promise.all(
+        list.map((s) =>
+          fetchHistoryRange(s.tag, fromIso, toIso)
+            .then((rows) => ({
+              ts: rows.map((r) => new Date(r.ts).getTime() / 1000),
+              val: rows.map((r) => Number(r.value)),
+            }))
+            .catch(() => ({ ts: [] as number[], val: [] as number[] })),
+        ),
+      );
+      const tsSet = new Set<number>();
+      for (const r of results) for (const t of r.ts) tsSet.add(t);
+      const xs = Array.from(tsSet).sort((a, b) => a - b);
+      const pos = new Map<number, number>();
+      xs.forEach((t, i) => pos.set(t, i));
+      const cols = results.map((r) => {
+        const col: (number | null)[] = new Array(xs.length).fill(null);
+        r.ts.forEach((t, i) => {
+          const p = pos.get(t);
+          if (p !== undefined) col[p] = r.val[i];
+        });
+        return col;
+      });
+      setData([xs, ...cols] as uPlot.AlignedData);
+    },
+    [],
+  );
+
+  // 3) (Dé)sélection d'un tag : amorce l'historique direct au moment de l'ajout.
   const toggleTag = (t: Tag) => {
     setSelected((cur) => {
       const exists = cur.find((s) => s.tag === t.name);
@@ -150,7 +220,7 @@ export function LiveView() {
         return cur.filter((s) => s.tag !== t.name);
       }
       const axis = defaultSide(cur, t.unit ?? null);
-      loadHistory(t.name, windowSec);
+      if (isLiveRef.current) loadHistory(t.name, liveSec);
       return [
         ...cur,
         { tag: t.name, label: tagLabel(t), idx: cur.length, unit: t.unit, axis },
@@ -158,13 +228,21 @@ export function LiveView() {
     });
   };
 
-  // 4) Au changement de fenêtre : recharge l'historique de toutes les séries
-  //    affichées (sinon agrandir la fenêtre ne montre rien de plus, le brut
-  //    au-delà ayant été purgé du buffer).
+  // En direct : (re)amorce les buffers au changement de fenêtre OU à l'entrée
+  // en mode direct (l'historique au-delà ayant pu être purgé du buffer).
   useEffect(() => {
-    for (const s of selected) loadHistory(s.tag, windowSec);
+    if (!isLive) return;
+    for (const s of selected) loadHistory(s.tag, liveSec);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [windowSec]);
+  }, [liveSec, isLive]);
+
+  // En historique : (re)charge la plage absolue quand elle change ou que la
+  // sélection de tags change.
+  useEffect(() => {
+    if (range.mode !== "absolute") return;
+    loadAbsolute(range.from, range.to, selected);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range, selectedTags]);
 
   const setAxis = (tag: string, axis: "left" | "right") =>
     setSelected((cur) => cur.map((s) => (s.tag === tag ? { ...s, axis } : s)));
@@ -177,6 +255,14 @@ export function LiveView() {
   const removeAll = () => {
     clear();
     setSelected([]);
+  };
+
+  const applyAbsolute = () => {
+    if (absFrom && absTo) setRange({ mode: "absolute", from: absFrom, to: absTo });
+  };
+  const backToLive = () => {
+    setPaused(false);
+    setRange({ mode: "relative", sec: 300 });
   };
 
   // Export CSV de la fenêtre courante : time ISO + une colonne par série.
@@ -202,6 +288,15 @@ export function LiveView() {
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  const statusClass = !isLive ? "hist" : paused ? "off" : live ? "live" : "off";
+  const statusText = !isLive
+    ? "◷ historique"
+    : paused
+      ? "❚❚ en pause"
+      : live
+        ? "● en direct"
+        : "○ déconnecté";
 
   return (
     <div className="live-layout">
@@ -239,22 +334,29 @@ export function LiveView() {
             {WINDOWS.map((w) => (
               <button
                 key={w.sec}
-                className={windowSec === w.sec ? "active" : ""}
-                onClick={() => setWindowSec(w.sec)}
+                className={isLive && range.sec === w.sec ? "active" : ""}
+                onClick={() => setRange({ mode: "relative", sec: w.sec })}
               >
                 {w.label}
               </button>
             ))}
+            <button
+              className={!isLive ? "active" : ""}
+              onClick={() => setShowRange((s) => !s)}
+              title="Plage de dates (historique)"
+            >
+              ◷ Plage…
+            </button>
           </div>
-          <span className={`status ${paused ? "off" : live ? "live" : "off"}`}>
-            {paused ? "❚❚ en pause" : live ? "● en direct" : "○ déconnecté"}
-          </span>
+          <span className={`status ${statusClass}`}>{statusText}</span>
           {selected.length > 0 && (
             <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-              <Button variant="outline" size="sm" onClick={() => setPaused((p) => !p)}>
-                {paused ? <Play /> : <Pause />}
-                {paused ? "Reprendre" : "Pause"}
-              </Button>
+              {isLive && (
+                <Button variant="outline" size="sm" onClick={() => setPaused((p) => !p)}>
+                  {paused ? <Play /> : <Pause />}
+                  {paused ? "Reprendre" : "Pause"}
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -275,7 +377,38 @@ export function LiveView() {
           )}
         </div>
 
-        {/* Chips des séries : couleur, libellé, choix d'axe, retrait */}
+        {/* Sélecteur de plage absolue (historique) */}
+        {showRange && (
+          <div className="range-abs">
+            <Calendar className="size-4" style={{ color: "var(--muted-foreground)" }} />
+            <label>
+              Du{" "}
+              <input
+                type="datetime-local"
+                value={absFrom}
+                onChange={(e) => setAbsFrom(e.target.value)}
+              />
+            </label>
+            <label>
+              Au{" "}
+              <input
+                type="datetime-local"
+                value={absTo}
+                onChange={(e) => setAbsTo(e.target.value)}
+              />
+            </label>
+            <Button size="sm" onClick={applyAbsolute}>
+              Appliquer
+            </Button>
+            {!isLive && (
+              <Button variant="ghost" size="sm" onClick={backToLive}>
+                Revenir au direct
+              </Button>
+            )}
+          </div>
+        )}
+
+        {/* Chips des séries : couleur, libellé, valeur, choix d'axe, retrait */}
         {selected.length > 0 && (
           <div className="series-chips">
             {selected.map((s, i) => (
@@ -326,8 +459,8 @@ export function LiveView() {
           )}
         </div>
 
-        {/* Écriture de consigne : seulement si une seule série est sélectionnée */}
-        {selected.length === 1 && (
+        {/* Écriture de consigne : seulement en direct, une seule série */}
+        {isLive && selected.length === 1 && (
           <div className="card">
             <CommandBox tag={selected[0].tag} unit={selected[0].unit ?? undefined} />
           </div>

@@ -62,6 +62,17 @@ export const fetchHistory = (tag: string, minutes: number) =>
     `/api/history?tag=${encodeURIComponent(tag)}&minutes=${minutes}`,
   );
 
+/**
+ * Historique sur une plage absolue [from, to] (ISO 8601). Mode « historique » de
+ * l'Explorer. Nécessite le support `from`/`to` côté gateway (cf. contrat d'API).
+ */
+export const fetchHistoryRange = (tag: string, fromIso: string, toIso: string) =>
+  api<{ ts: string; value: number }[]>(
+    `/api/history?tag=${encodeURIComponent(tag)}&from=${encodeURIComponent(
+      fromIso,
+    )}&to=${encodeURIComponent(toIso)}`,
+  );
+
 /** Libellé d'affichage d'un tag : label si présent, sinon son nom. */
 export function tagLabel(t: Tag): string {
   return t.label?.trim() ? t.label : t.name;
