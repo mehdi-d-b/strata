@@ -220,7 +220,7 @@ export function LiveView() {
                   title="Basculer l'axe (gauche/droite)"
                   onClick={() => setAxis(s.tag, s.axis === "left" ? "right" : "left")}
                 >
-                  {s.axis === "left" ? "G" : "D"}
+                  {s.axis === "left" ? "◧ G" : "D ◨"}
                 </button>
                 <button
                   className="x"
