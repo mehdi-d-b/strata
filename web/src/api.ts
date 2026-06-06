@@ -289,3 +289,40 @@ export type SystemInfo = {
 };
 
 export const fetchSystem = () => api<SystemInfo>("/api/system");
+
+// ─── Dashboards (multi-plots sauvegardés, privés par utilisateur) ──────────
+
+export type PanelSeries = { tag: string; axis: "left" | "right" };
+export type DashboardPanel = { id: string; title: string; series: PanelSeries[] };
+export type DashboardRange =
+  | { mode: "relative"; sec: number }
+  | { mode: "absolute"; from: string; to: string };
+export type DashboardSpec = {
+  panels: DashboardPanel[];
+  range: DashboardRange;
+  refreshSec: number;
+};
+
+export type DashboardSummary = { id: string; name: string; updated_at: string };
+export type Dashboard = {
+  id: string;
+  name: string;
+  spec: DashboardSpec;
+  updated_at: string;
+};
+
+export const fetchDashboards = () => api<DashboardSummary[]>("/api/dashboards");
+export const fetchDashboard = (id: string) =>
+  api<Dashboard>(`/api/dashboards/${encodeURIComponent(id)}`);
+export const createDashboard = (name: string, spec: DashboardSpec) =>
+  api<Dashboard>("/api/dashboards", {
+    method: "POST",
+    body: JSON.stringify({ name, spec }),
+  });
+export const updateDashboard = (id: string, name: string, spec: DashboardSpec) =>
+  api<Dashboard>(`/api/dashboards/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: JSON.stringify({ name, spec }),
+  });
+export const deleteDashboard = (id: string) =>
+  api(`/api/dashboards/${encodeURIComponent(id)}`, { method: "DELETE" });

@@ -2,6 +2,8 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./Layout";
 import { HomeView } from "./HomeView";
 import { LiveView } from "./LiveView";
+import { DashboardsView } from "./DashboardsView";
+import { DashboardView } from "./DashboardView";
 import { TagsView } from "./TagsView";
 import { ProductionView } from "./ProductionView";
 import { AdminView } from "./AdminView";
@@ -31,6 +33,8 @@ export function App() {
         <Route element={<Layout />}>
           <Route index element={<HomeView />} />
           <Route path="explorer" element={<LiveView />} />
+          <Route path="dashboards" element={<DashboardsView />} />
+          <Route path="dashboards/:id" element={<DashboardView />} />
           {/* Ancien chemin -> nouveau (compat liens existants) */}
           <Route path="live" element={<Navigate to="/explorer" replace />} />
           <Route path="production" element={<ProductionView />} />
