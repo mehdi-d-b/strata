@@ -3,6 +3,8 @@ import type uPlot from "uplot";
 import { MultiChart, type SeriesDef } from "./MultiChart";
 import { useRealtimeBuffers } from "./useRealtimeBuffers";
 import { CommandBox } from "./CommandBox";
+import { useTheme } from "./theme";
+import { chartPalette } from "./chartTheme";
 import { fetchHistory, fetchTags, tagLabel, type Tag } from "./api";
 
 const WINDOWS = [
@@ -11,13 +13,15 @@ const WINDOWS = [
   { label: "60 min", sec: 3600 },
 ];
 
-// Palette pour distinguer les courbes.
-const PALETTE = [
-  "#3fb950", "#58a6ff", "#f0883e", "#bc8cff", "#f85149",
-  "#39c5cf", "#e3b341", "#ff7b72", "#7ee787", "#d2a8ff",
-];
-
-type Selected = SeriesDef & { color: string };
+/** Série sélectionnée : on stocke l'INDEX de couleur (pas la couleur figée), pour
+ *  que la teinte soit résolue dans la palette du thème courant au rendu. */
+type Selected = {
+  tag: string;
+  label: string;
+  axis: "left" | "right";
+  unit?: string | null;
+  idx: number;
+};
 
 export function LiveView() {
   const [tags, setTags] = useState<Tag[]>([]);
@@ -27,6 +31,25 @@ export function LiveView() {
   const [live, setLive] = useState(false);
 
   const [data, setData] = useState<uPlot.AlignedData>([[]]);
+
+  // Palette résolue dans le thème courant (se met à jour au toggle clair/sombre).
+  const { theme } = useTheme();
+  const palette = useMemo(() => chartPalette(), [theme]);
+  const colorOf = (idx: number) => palette[idx % palette.length];
+
+  // Séries au format MultiChart (couleur concrète résolue depuis l'index).
+  const seriesForChart = useMemo<SeriesDef[]>(
+    () =>
+      selected.map((s) => ({
+        tag: s.tag,
+        label: s.label,
+        color: colorOf(s.idx),
+        axis: s.axis,
+        unit: s.unit,
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selected, palette],
+  );
 
   // 1) Charger la liste des tags configurés.
   useEffect(() => {
@@ -77,11 +100,10 @@ export function LiveView() {
         clear(t.name);
         return cur.filter((s) => s.tag !== t.name);
       }
-      const color = PALETTE[cur.length % PALETTE.length];
       loadHistory(t.name, windowSec);
       return [
         ...cur,
-        { tag: t.name, label: tagLabel(t), color, axis: "left", unit: t.unit },
+        { tag: t.name, label: tagLabel(t), idx: cur.length, axis: "left", unit: t.unit },
       ];
     });
   };
@@ -160,7 +182,7 @@ export function LiveView() {
           <div className="series-chips">
             {selected.map((s) => (
               <span key={s.tag} className="series-chip">
-                <span className="dot" style={{ background: s.color }} />
+                <span className="dot" style={{ background: colorOf(s.idx) }} />
                 <span className="series-chip-label">{s.label}</span>
                 <button
                   className={`axis-toggle ${s.axis}`}
@@ -186,7 +208,7 @@ export function LiveView() {
               Sélectionne un ou plusieurs tags à gauche pour tracer leurs courbes.
             </div>
           ) : (
-            <MultiChart data={data} series={selected} />
+            <MultiChart data={data} series={seriesForChart} />
           )}
         </div>
 

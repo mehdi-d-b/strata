@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
 import uPlot from "uplot";
+import { useTheme } from "./theme";
+import { chartAxisTheme } from "./chartTheme";
 
 export type SeriesDef = {
   tag: string;
@@ -41,6 +43,7 @@ export function MultiChart({ data, series, height = 420 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const plot = useRef<uPlot | null>(null);
   const lastKey = useRef<string>("__none__");
+  const { theme } = useTheme();
 
   useEffect(() => {
     if (!ref.current) return;
@@ -49,7 +52,9 @@ export function MultiChart({ data, series, height = 420 }: Props) {
     // changement d'axe, qui recrée le plot). On force donc une recréation au
     // passage vide -> non-vide.
     const hasData = ((data[0] as number[] | undefined)?.length ?? 0) > 0;
-    const key = structureKey(series) + (hasData ? "#data" : "#empty");
+    // `theme` dans la clé => recréation du plot au toggle clair/sombre (les
+    // couleurs canvas étant figées à la création).
+    const key = structureKey(series) + theme + (hasData ? "#data" : "#empty");
     if (plot.current && key === lastKey.current) return; // structure inchangée
     lastKey.current = key;
     plot.current?.destroy();
@@ -70,15 +75,17 @@ export function MultiChart({ data, series, height = 420 }: Props) {
       })),
     ];
 
+    // Couleurs lues dans le thème courant (la classe .dark est déjà à jour ici).
+    const ax = chartAxisTheme();
     const axes: uPlot.Axis[] = [
-      { stroke: "#8b97a7", grid: { stroke: "#1d242e" } },
-      { scale: "left", stroke: "#8b97a7", grid: { stroke: "#1d242e" } },
+      { stroke: ax.stroke, grid: { stroke: ax.grid } },
+      { scale: "left", stroke: ax.stroke, grid: { stroke: ax.grid } },
     ];
     if (hasRight) {
       axes.push({
         scale: "right",
         side: 1,
-        stroke: "#8b97a7",
+        stroke: ax.stroke,
         grid: { show: false },
       });
     }
@@ -106,7 +113,7 @@ export function MultiChart({ data, series, height = 420 }: Props) {
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [series, height, data]);
+  }, [series, height, data, theme]);
 
   // Mise à jour des données sans recréer le plot (toujours bien dimensionnée).
   useEffect(() => {

@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
 import uPlot from "uplot";
+import { useTheme } from "./theme";
+import { chartAxisTheme, chartPalette } from "./chartTheme";
 
 type Props = {
   /** [timestamps(s), valeurs] au format uPlot. */
@@ -11,12 +13,14 @@ type Props = {
 export function RealtimeChart({ data, label }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const plot = useRef<uPlot | null>(null);
+  const { theme } = useTheme();
 
-  // (Re)création du plot quand le label change (titre de série).
+  // (Re)création du plot quand le label OU le thème change (couleurs canvas figées).
   useEffect(() => {
     if (!ref.current) return;
     plot.current?.destroy();
 
+    const ax = chartAxisTheme();
     const opts: uPlot.Options = {
       width: ref.current.clientWidth,
       height: 360,
@@ -26,14 +30,14 @@ export function RealtimeChart({ data, label }: Props) {
         {},
         {
           label,
-          stroke: "#3fb950",
+          stroke: chartPalette()[0],
           width: 2,
           points: { show: false },
         },
       ],
       axes: [
-        { stroke: "#8b97a7", grid: { stroke: "#1d242e" } },
-        { stroke: "#8b97a7", grid: { stroke: "#1d242e" } },
+        { stroke: ax.stroke, grid: { stroke: ax.grid } },
+        { stroke: ax.stroke, grid: { stroke: ax.grid } },
       ],
     };
 
@@ -48,7 +52,7 @@ export function RealtimeChart({ data, label }: Props) {
       plot.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [label]);
+  }, [label, theme]);
 
   // Mise à jour des données sans recréer le plot.
   useEffect(() => {

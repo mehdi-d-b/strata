@@ -700,3 +700,15 @@ textarea.csv {
   font-size: 13px;
   resize: vertical;
 }
+
+/* ─── uPlot : DOM (titre + légende) aligné sur les tokens ───────── */
+.uplot,
+.u-title,
+.u-legend {
+  color: var(--foreground);
+  font-family: inherit;
+}
+
+.u-legend .u-inactive {
+  opacity: 0.45;
+}
