@@ -4,6 +4,7 @@ import {
   Cpu,
   Factory,
   LayoutDashboard,
+  LayoutGrid,
   LineChart,
   LogOut,
   PanelLeftClose,
@@ -35,6 +36,7 @@ const NAV: NavGroup[] = [
     items: [
       { to: "/", label: "Accueil", icon: LayoutDashboard, end: true },
       { to: "/explorer", label: "Explorer", icon: LineChart },
+      { to: "/dashboards", label: "Dashboards", icon: LayoutGrid },
       { to: "/production", label: "Production", icon: Factory },
     ],
   },
