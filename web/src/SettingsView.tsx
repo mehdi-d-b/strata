@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { toast } from "sonner";
 import {
   ApiError,
   changeMyPassword,
@@ -11,42 +12,56 @@ import {
   type SystemInfo,
 } from "./api";
 import { useAuth } from "./auth";
+import { PageHeader } from "@/components/PageHeader";
+import { Section } from "@/components/Section";
+import { TabBar } from "@/components/TabBar";
+import { KpiCard } from "@/components/KpiCard";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
-type Section = "account" | "display" | "storage" | "system";
+type Tab = "account" | "display" | "storage" | "system";
+
+/** Champ de formulaire : libellé au-dessus, contenu en dessous. */
+function Field({ label, children }: { label: ReactNode; children: ReactNode }) {
+  return (
+    <label className="flex max-w-sm flex-col gap-1.5 text-sm text-muted-foreground">
+      {label}
+      {children}
+    </label>
+  );
+}
 
 export function SettingsView() {
   const { user } = useAuth();
   const admin = userIsAdmin(user);
-  const [section, setSection] = useState<Section>("account");
+  const [tab, setTab] = useState<Tab>("account");
 
-  // Sections visibles selon le rôle.
-  const tabs: { id: Section; label: string; adminOnly?: boolean }[] = [
-    { id: "account", label: "Mon compte" },
-    { id: "display", label: "Affichage" },
-    { id: "storage", label: "Stockage", adminOnly: true },
-    { id: "system", label: "Système", adminOnly: true },
-  ];
+  const tabs = (
+    [
+      { id: "account", label: "Mon compte" },
+      { id: "display", label: "Affichage" },
+      { id: "storage", label: "Stockage", adminOnly: true },
+      { id: "system", label: "Système", adminOnly: true },
+    ] as { id: Tab; label: string; adminOnly?: boolean }[]
+  ).filter((t) => !t.adminOnly || admin);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div className="subnav">
-        {tabs
-          .filter((t) => !t.adminOnly || admin)
-          .map((t) => (
-            <button
-              key={t.id}
-              className={section === t.id ? "active" : ""}
-              onClick={() => setSection(t.id)}
-            >
-              {t.label}
-            </button>
-          ))}
-      </div>
-      {section === "account" && <AccountSection />}
-      {section === "display" && <DisplaySection />}
-      {section === "storage" && admin && <StorageSection />}
-      {section === "system" && admin && <SystemSection />}
-    </div>
+    <>
+      <PageHeader title="Paramètres" description="Compte, affichage, stockage et système." />
+      <TabBar tabs={tabs} value={tab} onChange={setTab} />
+      {tab === "account" && <AccountSection />}
+      {tab === "display" && <DisplaySection />}
+      {tab === "storage" && admin && <StorageSection />}
+      {tab === "system" && admin && <SystemSection />}
+    </>
   );
 }
 
@@ -56,60 +71,47 @@ function AccountSection() {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMsg(null);
     if (next !== confirm) {
-      setMsg({ ok: false, text: "la confirmation ne correspond pas" });
+      toast.error("La confirmation ne correspond pas.");
       return;
     }
     try {
       await changeMyPassword(current, next);
-      setMsg({ ok: true, text: "mot de passe modifié" });
+      toast.success("Mot de passe modifié.");
       setCurrent("");
       setNext("");
       setConfirm("");
     } catch (err) {
-      setMsg({
-        ok: false,
-        text:
-          err instanceof ApiError && err.status === 403
-            ? "mot de passe actuel incorrect"
-            : "échec de la modification",
-      });
+      toast.error(
+        err instanceof ApiError && err.status === 403
+          ? "Mot de passe actuel incorrect."
+          : "Échec de la modification.",
+      );
     }
   };
 
   return (
-    <div className="card">
-      <h2 className="card-title">Changer mon mot de passe</h2>
-      <form onSubmit={submit} className="form-col">
-        <label className="field">
-          Mot de passe actuel
-          <input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} />
-        </label>
-        <label className="field">
-          Nouveau mot de passe
-          <input type="password" value={next} onChange={(e) => setNext(e.target.value)} />
-        </label>
-        <label className="field">
-          Confirmer
-          <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
-        </label>
+    <Section title="Changer mon mot de passe">
+      <form onSubmit={submit} className="flex flex-col gap-3">
+        <Field label="Mot de passe actuel">
+          <Input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+        </Field>
+        <Field label="Nouveau mot de passe">
+          <Input type="password" value={next} onChange={(e) => setNext(e.target.value)} />
+        </Field>
+        <Field label="Confirmer">
+          <Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+        </Field>
         <div>
-          <button className="add" type="submit" disabled={!current || !next}>
+          <Button type="submit" size="sm" disabled={!current || !next}>
             Mettre à jour
-          </button>
-          {msg && (
-            <span className={`hint ${msg.ok ? "ok-text" : "err-text"}`} style={{ marginLeft: 10 }}>
-              {msg.text}
-            </span>
-          )}
+          </Button>
         </div>
       </form>
-    </div>
+    </Section>
   );
 }
 
@@ -126,31 +128,29 @@ export function loadPrefs(): { defaultWindowSec: number } {
 
 function DisplaySection() {
   const [win, setWin] = useState(loadPrefs().defaultWindowSec);
-  const [saved, setSaved] = useState(false);
 
   const save = () => {
     localStorage.setItem(PREF_KEY, JSON.stringify({ defaultWindowSec: win }));
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
+    toast.success("Préférences enregistrées.");
   };
 
   return (
-    <div className="card">
-      <h2 className="card-title">Préférences d'affichage</h2>
-      <label className="field">
-        Fenêtre temps réel par défaut
-        <select value={win} onChange={(e) => setWin(Number(e.target.value))}>
-          <option value={300}>5 minutes</option>
-          <option value={900}>15 minutes</option>
-          <option value={3600}>60 minutes</option>
-        </select>
-      </label>
-      <p className="hint">Stocké dans ce navigateur uniquement.</p>
-      <button className="add" onClick={save}>
-        Enregistrer
-      </button>
-      {saved && <span className="hint ok-text" style={{ marginLeft: 10 }}>enregistré</span>}
-    </div>
+    <Section title="Préférences d'affichage" hint="Stocké dans ce navigateur uniquement.">
+      <div className="flex flex-col gap-3">
+        <Field label="Fenêtre temps réel par défaut">
+          <select value={win} onChange={(e) => setWin(Number(e.target.value))}>
+            <option value={300}>5 minutes</option>
+            <option value={900}>15 minutes</option>
+            <option value={3600}>60 minutes</option>
+          </select>
+        </Field>
+        <div>
+          <Button size="sm" onClick={save}>
+            Enregistrer
+          </Button>
+        </div>
+      </div>
+    </Section>
   );
 }
 
@@ -160,7 +160,6 @@ function StorageSection() {
   const [st, setSt] = useState<Storage | null>(null);
   const [retention, setRet] = useState(365);
   const [compress, setComp] = useState(7);
-  const [msg, setMsg] = useState<string | null>(null);
 
   const load = () => fetchStorage().then(setSt).catch(() => setSt(null));
   useEffect(() => {
@@ -169,12 +168,14 @@ function StorageSection() {
 
   const applyRetention = async () => {
     await setRetention(retention);
-    setMsg(retention === 0 ? "purge désactivée" : `rétention : ${retention} j`);
+    toast.success(retention === 0 ? "Purge désactivée." : `Rétention : ${retention} j.`);
     load();
   };
   const applyCompression = async () => {
     await setCompression(compress);
-    setMsg(compress === 0 ? "compression désactivée" : `compression après ${compress} j`);
+    toast.success(
+      compress === 0 ? "Compression désactivée." : `Compression après ${compress} j.`,
+    );
     load();
   };
 
@@ -184,71 +185,66 @@ function StorageSection() {
       : null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div className="card">
-        <h2 className="card-title">État du stockage</h2>
-        <div className="kpi-grid">
-          <Stat label="Taille (mesures)" value={st?.size.total ?? "…"} />
-          <Stat label="Lignes" value={st?.size.rows ?? "…"} />
-          <Stat label="Compressé" value={st?.compression.after ?? "—"} />
-          <Stat label="Ratio compression" value={ratio ? `${ratio}×` : "—"} />
+    <>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <KpiCard label="Taille (mesures)" value={st?.size.total ?? "…"} />
+        <KpiCard label="Lignes" value={st?.size.rows ?? "…"} />
+        <KpiCard label="Compressé" value={st?.compression.after ?? "—"} />
+        <KpiCard label="Ratio compression" value={ratio ? `${ratio}×` : "—"} tone="good" />
+      </div>
+
+      <Section title="Rétention du brut">
+        <p className="mb-3 text-xs text-muted-foreground">
+          Supprime automatiquement les mesures plus anciennes. 0 = ne jamais purger. Les
+          agrégats production/shift ne sont pas affectés.
+        </p>
+        <div className="flex flex-col gap-3">
+          <Field label="Conserver (jours)">
+            <Input
+              type="number"
+              min={0}
+              max={3650}
+              value={retention}
+              onChange={(e) => setRet(Number(e.target.value))}
+            />
+          </Field>
+          <div className="flex items-center gap-3">
+            <Button size="sm" onClick={applyRetention}>
+              Appliquer
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              Actuel : {st?.retention_after ?? "non configuré"}
+            </span>
+          </div>
         </div>
-      </div>
+      </Section>
 
-      <div className="card">
-        <h2 className="card-title">Rétention du brut</h2>
-        <p className="hint">
-          Supprime automatiquement les mesures plus anciennes. 0 = ne jamais purger.
-          Les agrégats production/shift ne sont pas affectés.
+      <Section title="Compression">
+        <p className="mb-3 text-xs text-muted-foreground">
+          Compresse les chunks plus vieux que N jours (gain ~10-20×, restent interrogeables).
+          0 = désactiver.
         </p>
-        <label className="field">
-          Conserver (jours)
-          <input
-            type="number"
-            min={0}
-            max={3650}
-            value={retention}
-            onChange={(e) => setRet(Number(e.target.value))}
-          />
-        </label>
-        <button className="add" onClick={applyRetention}>
-          Appliquer
-        </button>
-        <p className="hint">Actuel : {st?.retention_after ?? "non configuré"}</p>
-      </div>
-
-      <div className="card">
-        <h2 className="card-title">Compression</h2>
-        <p className="hint">
-          Compresse les chunks plus vieux que N jours (gain ~10-20×, restent
-          interrogeables). 0 = désactiver.
-        </p>
-        <label className="field">
-          Compresser après (jours)
-          <input
-            type="number"
-            min={0}
-            max={3650}
-            value={compress}
-            onChange={(e) => setComp(Number(e.target.value))}
-          />
-        </label>
-        <button className="add" onClick={applyCompression}>
-          Appliquer
-        </button>
-        <p className="hint">Actuel : {st?.compress_after ?? "non configuré"}</p>
-        {msg && <p className="hint ok-text">{msg}</p>}
-      </div>
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="card kpi">
-      <div className="kpi-label">{label}</div>
-      <div className="kpi-value" style={{ fontSize: 22 }}>{value}</div>
-    </div>
+        <div className="flex flex-col gap-3">
+          <Field label="Compresser après (jours)">
+            <Input
+              type="number"
+              min={0}
+              max={3650}
+              value={compress}
+              onChange={(e) => setComp(Number(e.target.value))}
+            />
+          </Field>
+          <div className="flex items-center gap-3">
+            <Button size="sm" onClick={applyCompression}>
+              Appliquer
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              Actuel : {st?.compress_after ?? "non configuré"}
+            </span>
+          </div>
+        </div>
+      </Section>
+    </>
   );
 }
 
@@ -260,54 +256,72 @@ function SystemSection() {
     fetchSystem().then(setSys).catch(() => setSys(null));
   }, []);
 
-  if (!sys) return <div className="card hint">Chargement…</div>;
+  if (!sys) {
+    return (
+      <Section title="Système">
+        <p className="text-sm text-muted-foreground">Chargement…</p>
+      </Section>
+    );
+  }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div className="card">
-        <h2 className="card-title">Inventaire</h2>
-        <div className="kpi-grid">
-          <Stat label="Tags" value={String(sys.counts.tags)} />
-          <Stat label="Automates" value={String(sys.counts.devices)} />
-          <Stat label="Utilisateurs" value={String(sys.counts.users)} />
-          <Stat label="Mesures" value={String(sys.counts.mesures)} />
-        </div>
+    <>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <KpiCard label="Tags" value={sys.counts.tags} />
+        <KpiCard label="Automates" value={sys.counts.devices} />
+        <KpiCard label="Utilisateurs" value={sys.counts.users} />
+        <KpiCard label="Mesures" value={sys.counts.mesures} />
       </div>
 
-      <div className="card">
-        <h2 className="card-title">Versions</h2>
-        <table className="tags">
-          <tbody>
-            <tr><td>TimescaleDB</td><td><code>{sys.timescaledb_version}</code></td></tr>
-            <tr><td>Node (gateway)</td><td><code>{sys.node_version}</code></td></tr>
-          </tbody>
-        </table>
-      </div>
+      <Section title="Versions">
+        <Table>
+          <TableBody>
+            <TableRow>
+              <TableCell>TimescaleDB</TableCell>
+              <TableCell>
+                <code className="text-[var(--chart-2)]">{sys.timescaledb_version}</code>
+              </TableCell>
+            </TableRow>
+            <TableRow>
+              <TableCell>Node (gateway)</TableCell>
+              <TableCell>
+                <code className="text-[var(--chart-2)]">{sys.node_version}</code>
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </Section>
 
-      <div className="card">
-        <h2 className="card-title">Connecteurs PLC4X</h2>
+      <Section title="Connecteurs PLC4X">
         {sys.connectors.length === 0 ? (
-          <p className="hint">Aucun connecteur (profil plc4x non démarré ou aucun déployé).</p>
+          <p className="text-sm text-muted-foreground">
+            Aucun connecteur (profil plc4x non démarré ou aucun déployé).
+          </p>
         ) : (
-          <table className="tags">
-            <thead>
-              <tr><th>Connecteur</th><th>État</th></tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Connecteur</TableHead>
+                <TableHead>État</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {sys.connectors.map((c) => (
-                <tr key={c.name}>
-                  <td><code>{c.name}</code></td>
-                  <td>
+                <TableRow key={c.name}>
+                  <TableCell>
+                    <code className="text-[var(--chart-2)]">{c.name}</code>
+                  </TableCell>
+                  <TableCell>
                     <span className={`status ${c.state === "RUNNING" ? "live" : "off"}`}>
                       {c.state}
                     </span>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
-      </div>
-    </div>
+      </Section>
+    </>
   );
 }

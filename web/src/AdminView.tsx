@@ -16,6 +16,7 @@ import {
 } from "./api";
 import { PageHeader } from "@/components/PageHeader";
 import { Section } from "@/components/Section";
+import { TabBar } from "@/components/TabBar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -43,22 +44,7 @@ export function AdminView() {
         title="Administration"
         description="Utilisateurs, rôles & droits, journal d'audit."
       />
-      <div className="flex gap-1">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={cn(
-              "rounded-md border px-3 py-1.5 text-sm transition-colors",
-              tab === t.id
-                ? "border-primary bg-card text-foreground"
-                : "border-border bg-secondary text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <TabBar tabs={TABS} value={tab} onChange={setTab} />
       {tab === "users" && <UsersSection />}
       {tab === "roles" && <RolesSection />}
       {tab === "audit" && <AuditSection />}
