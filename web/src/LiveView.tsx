@@ -58,6 +58,13 @@ export function LiveView() {
     if (!pausedRef.current) setData(d);
   }, []);
 
+  // Le zoom au glisser met en pause (sinon la frame suivante annule le zoom).
+  // On force le ref tout de suite pour qu'aucune frame ne passe avant le re-render.
+  const onUserZoom = useCallback(() => {
+    pausedRef.current = true;
+    setPaused(true);
+  }, []);
+
   // API impérative du graphe (reset zoom).
   const chartApiRef = useRef<ChartApi>(null);
 
@@ -240,7 +247,7 @@ export function LiveView() {
             ))}
           </div>
           <span className={`status ${paused ? "off" : live ? "live" : "off"}`}>
-            {paused ? "❚❚ en pause" : live ? "● live" : "○ déconnecté"}
+            {paused ? "❚❚ en pause" : live ? "● en direct" : "○ déconnecté"}
           </span>
           {selected.length > 0 && (
             <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
@@ -255,7 +262,7 @@ export function LiveView() {
                 title="Réinitialiser le zoom"
               >
                 <RotateCcw />
-                Reset zoom
+                Réinit. zoom
               </Button>
               <Button variant="outline" size="sm" onClick={exportCsv} title="Exporter en CSV">
                 <Download />
@@ -310,7 +317,12 @@ export function LiveView() {
               Sélectionne un ou plusieurs tags à gauche pour tracer leurs courbes.
             </div>
           ) : (
-            <MultiChart ref={chartApiRef} data={data} series={seriesForChart} />
+            <MultiChart
+              ref={chartApiRef}
+              data={data}
+              series={seriesForChart}
+              onUserZoom={onUserZoom}
+            />
           )}
         </div>
 

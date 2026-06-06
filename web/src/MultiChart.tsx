@@ -25,6 +25,8 @@ type Props = {
   data: uPlot.AlignedData;
   series: SeriesDef[];
   height?: number;
+  /** Appelé quand l'utilisateur zoome au glisser (pour auto-mettre en pause). */
+  onUserZoom?: () => void;
 };
 
 /** Signature qui déclenche la RECRÉATION du plot (structure des séries changée). */
@@ -117,13 +119,16 @@ function tooltipPlugin(series: SeriesDef[]): uPlot.Plugin {
 
 /** Graphe uPlot multi-séries : deux échelles indépendantes, tooltip multi-séries. */
 export const MultiChart = forwardRef<ChartApi, Props>(function MultiChart(
-  { data, series, height = 420 },
+  { data, series, height = 420, onUserZoom },
   apiRef,
 ) {
   const ref = useRef<HTMLDivElement>(null);
   const plot = useRef<uPlot | null>(null);
   const lastKey = useRef<string>("__none__");
   const { theme } = useTheme();
+  // Toujours appeler la dernière version du callback depuis le hook uPlot.
+  const onZoomRef = useRef(onUserZoom);
+  onZoomRef.current = onUserZoom;
 
   // API impérative : reset zoom = setData avec ré-init des échelles (auto-range).
   useImperativeHandle(
@@ -196,10 +201,21 @@ export const MultiChart = forwardRef<ChartApi, Props>(function MultiChart(
       height,
       scales,
       legend: { show: false }, // remplacée par le tooltip multi-séries
-      cursor: { focus: { prox: 16 } },
+      // Glisser = zoom boîte (X et Y). Double-clic = reset (natif uPlot).
+      cursor: { drag: { x: true, y: true }, focus: { prox: 16 } },
       series: uSeries,
       axes,
-      plugins: [tooltipPlugin(series)],
+      plugins: [
+        tooltipPlugin(series),
+        // Détecte le zoom au glisser pour prévenir le parent (auto-pause).
+        {
+          hooks: {
+            setSelect: (u) => {
+              if (u.select.width > 0) onZoomRef.current?.();
+            },
+          },
+        },
+      ],
     };
 
     plot.current = new uPlot(opts, shape(data, series.length), ref.current);
