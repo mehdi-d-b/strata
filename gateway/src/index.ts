@@ -375,18 +375,72 @@ app.delete("/api/tags/:name", { preHandler: requireAuth }, async (req, reply) =>
 
 // Historique d'un tag, scaling appliqué côté SQL.
 app.get("/api/history", async (req, reply) => {
-  const q = req.query as { tag?: string; minutes?: string };
+  const q = req.query as {
+    tag?: string;
+    minutes?: string;
+    from?: string;
+    to?: string;
+    maxPoints?: string;
+  };
   const tag = q.tag;
-  const minutes = Number(q.minutes ?? 15);
   if (!tag) return reply.code(400).send({ error: "param 'tag' requis" });
+
   const cfg = tagCache.get(tag);
   const scale = cfg?.scale ?? 1;
   const offset = cfg?.offset ?? 0;
+
+  // Plafond de points renvoyés (down-sampling au-delà). Borné pour éviter d'écrouler
+  // le navigateur ET de surcharger la base.
+  const maxPoints = Math.min(20000, Math.max(100, Number(q.maxPoints) || 4000));
+
+  // Détermine la fenêtre : plage absolue from/to (prioritaire) sinon `minutes`.
+  let fromTs: Date;
+  let toTs: Date;
+  if (q.from || q.to) {
+    fromTs = new Date(q.from ?? "");
+    toTs = new Date(q.to ?? "");
+    if (isNaN(fromTs.getTime()) || isNaN(toTs.getTime()))
+      return reply.code(400).send({ error: "from/to doivent être des dates ISO 8601 valides" });
+    if (fromTs >= toTs)
+      return reply.code(400).send({ error: "from doit être strictement avant to" });
+  } else {
+    const minutes = Number(q.minutes ?? 15);
+    if (!Number.isFinite(minutes) || minutes <= 0)
+      return reply.code(400).send({ error: "minutes doit être un nombre positif" });
+    toTs = new Date();
+    fromTs = new Date(toTs.getTime() - minutes * 60_000);
+  }
+
+  // Combien de points bruts dans la fenêtre ? Si ça dépasse maxPoints, on
+  // agrège par buckets temporels (moyenne) pour borner le volume tout en gardant
+  // la forme de la courbe ; sinon on renvoie le brut (aucune perte).
+  const countRes = await pool.query(
+    "SELECT count(*)::bigint AS n FROM mesures WHERE tag = $1 AND ts >= $2 AND ts <= $3",
+    [tag, fromTs.toISOString(), toTs.toISOString()],
+  );
+  const n = Number(countRes.rows[0].n);
+
+  if (n <= maxPoints) {
+    const { rows } = await pool.query(
+      `SELECT ts, value * $2 + $3 AS value FROM mesures
+       WHERE tag = $1 AND ts >= $4 AND ts <= $5
+       ORDER BY ts ASC`,
+      [tag, scale, offset, fromTs.toISOString(), toTs.toISOString()],
+    );
+    return rows;
+  }
+
+  // Down-sampling : 1 point par bucket = durée_fenêtre / maxPoints (>= 1 ms).
+  const spanMs = toTs.getTime() - fromTs.getTime();
+  const bucketMs = Math.max(1, Math.ceil(spanMs / maxPoints));
   const { rows } = await pool.query(
-    `SELECT ts, value * $2 + $3 AS value FROM mesures
-     WHERE tag = $1 AND ts > now() - ($4 || ' minutes')::interval
-     ORDER BY ts ASC`,
-    [tag, scale, offset, minutes],
+    `SELECT time_bucket(($4 || ' milliseconds')::interval, ts) AS ts,
+            avg(value) * $2 + $3 AS value
+     FROM mesures
+     WHERE tag = $1 AND ts >= $5 AND ts <= $6
+     GROUP BY 1
+     ORDER BY 1 ASC`,
+    [tag, scale, offset, bucketMs, fromTs.toISOString(), toTs.toISOString()],
   );
   return rows;
 });
