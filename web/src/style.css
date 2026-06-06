@@ -16,6 +16,26 @@ main {
   gap: 24px;
 }
 
+/* ─── Densité compacte (Paramètres › Affichage) ────────────────── */
+[data-density="compact"] main {
+  padding: 16px;
+  gap: 16px;
+}
+
+[data-density="compact"] [data-slot="table-cell"] {
+  padding-top: 0.3rem;
+  padding-bottom: 0.3rem;
+}
+
+[data-density="compact"] [data-slot="table-head"] {
+  height: 2rem;
+}
+
+[data-density="compact"] [data-slot="card"] {
+  padding-top: 1rem;
+  padding-bottom: 1rem;
+}
+
 /* Select natif (rôles, protocole, fenêtre…) calé sur les tokens. */
 select {
   background: var(--secondary);
