@@ -292,57 +292,6 @@ select {
   color: var(--good);
 }
 
-/* ─── Écriture de consigne (CommandBox) ────────────────────────── */
-.cmdbox {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
-  font-size: 13px;
-}
-
-.cmdbox-label {
-  color: var(--muted-foreground);
-}
-
-.cmdbox input {
-  background: var(--background);
-  color: var(--foreground);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 7px 10px;
-  width: 120px;
-  font-size: 13px;
-}
-
-.cmdbox-unit {
-  color: var(--muted-foreground);
-}
-
-.cmdbox button {
-  background: var(--chart-4);
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-  padding: 7px 14px;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.cmdbox button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.cmdbox-msg.ok {
-  color: var(--good);
-}
-.cmdbox-msg.err {
-  color: var(--bad);
-}
-
 /* ─── uPlot : DOM (titre + légende) aligné sur les tokens ───────── */
 .uplot,
 .u-title,

@@ -12,6 +12,7 @@ import {
   type SystemInfo,
 } from "./api";
 import { useAuth } from "./auth";
+import { loadPrefs, savePrefs } from "./prefs";
 import { PageHeader } from "@/components/PageHeader";
 import { Section } from "@/components/Section";
 import { TabBar } from "@/components/TabBar";
@@ -117,20 +118,11 @@ function AccountSection() {
 
 // ─── Affichage (préférences locales) ─────────────────────────────────────
 
-const PREF_KEY = "strata.prefs";
-export function loadPrefs(): { defaultWindowSec: number } {
-  try {
-    return { defaultWindowSec: 300, ...JSON.parse(localStorage.getItem(PREF_KEY) ?? "{}") };
-  } catch {
-    return { defaultWindowSec: 300 };
-  }
-}
-
 function DisplaySection() {
   const [win, setWin] = useState(loadPrefs().defaultWindowSec);
 
   const save = () => {
-    localStorage.setItem(PREF_KEY, JSON.stringify({ defaultWindowSec: win }));
+    savePrefs({ defaultWindowSec: win });
     toast.success("Préférences enregistrées.");
   };
 

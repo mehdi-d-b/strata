@@ -1,6 +1,9 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import { ApiError, canWrite, sendCommand } from "./api";
 import { useAuth } from "./auth";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 /**
  * Widget d'écriture de consigne pour un tag. Ne s'affiche que si l'utilisateur
@@ -9,50 +12,44 @@ import { useAuth } from "./auth";
 export function CommandBox({ tag, unit }: { tag: string; unit?: string }) {
   const { user } = useAuth();
   const [value, setValue] = useState("");
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   if (!canWrite(user, tag)) return null;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMsg(null);
     const v = Number(value);
     if (Number.isNaN(v)) {
-      setMsg({ ok: false, text: "valeur invalide" });
+      toast.error("Valeur invalide.");
       return;
     }
     try {
       await sendCommand(tag, v);
-      setMsg({ ok: true, text: `consigne ${v}${unit ? " " + unit : ""} envoyée` });
+      toast.success(`Consigne ${v}${unit ? " " + unit : ""} envoyée.`);
       setValue("");
     } catch (err) {
-      setMsg({
-        ok: false,
-        text:
-          err instanceof ApiError && err.status === 403
-            ? "non autorisé"
-            : "échec de l'envoi",
-      });
+      toast.error(
+        err instanceof ApiError && err.status === 403
+          ? "Non autorisé."
+          : "Échec de l'envoi.",
+      );
     }
   };
 
   return (
-    <form className="cmdbox" onSubmit={submit}>
-      <span className="cmdbox-label">Consigne :</span>
-      <input
+    <form className="flex items-center gap-2" onSubmit={submit}>
+      <span className="text-sm text-muted-foreground">Consigne :</span>
+      <Input
         type="number"
         step="any"
         placeholder="valeur"
+        className="w-32"
         value={value}
         onChange={(e) => setValue(e.target.value)}
       />
-      {unit && <span className="cmdbox-unit">{unit}</span>}
-      <button type="submit" disabled={value === ""}>
+      {unit && <span className="text-sm text-muted-foreground">{unit}</span>}
+      <Button type="submit" size="sm" disabled={value === ""}>
         Écrire
-      </button>
-      {msg && (
-        <span className={`cmdbox-msg ${msg.ok ? "ok" : "err"}`}>{msg.text}</span>
-      )}
+      </Button>
     </form>
   );
 }
