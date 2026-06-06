@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import uPlot from "uplot";
 import { useTheme } from "./theme";
 import { chartAxisTheme } from "./chartTheme";
@@ -10,6 +10,14 @@ export type SeriesDef = {
   unit?: string | null;
   /** Côté/échelle d'affichage (deux échelles indépendantes, auto-range séparé). */
   axis: "left" | "right";
+  /** Série masquée (gardée en mémoire mais non tracée). */
+  hidden?: boolean;
+};
+
+/** API impérative exposée par le graphe (contrôles externes). */
+export type ChartApi = {
+  /** Réinitialise le zoom : ré-auto-range sur l'étendue des données. */
+  resetZoom: () => void;
 };
 
 type Props = {
@@ -107,12 +115,27 @@ function tooltipPlugin(series: SeriesDef[]): uPlot.Plugin {
   };
 }
 
-/** Graphe uPlot multi-séries : une échelle/axe par unité, tooltip multi-séries. */
-export function MultiChart({ data, series, height = 420 }: Props) {
+/** Graphe uPlot multi-séries : deux échelles indépendantes, tooltip multi-séries. */
+export const MultiChart = forwardRef<ChartApi, Props>(function MultiChart(
+  { data, series, height = 420 },
+  apiRef,
+) {
   const ref = useRef<HTMLDivElement>(null);
   const plot = useRef<uPlot | null>(null);
   const lastKey = useRef<string>("__none__");
   const { theme } = useTheme();
+
+  // API impérative : reset zoom = setData avec ré-init des échelles (auto-range).
+  useImperativeHandle(
+    apiRef,
+    () => ({
+      resetZoom: () => {
+        const u = plot.current;
+        if (u) u.setData(u.data as uPlot.AlignedData, true);
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     if (!ref.current) return;
@@ -136,6 +159,7 @@ export function MultiChart({ data, series, height = 420 }: Props) {
         scale: s.axis, // "left" | "right" = deux échelles indépendantes
         spanGaps: true, // relie par-dessus les null (séries non synchrones)
         points: { show: false },
+        show: !s.hidden,
       })),
     ];
 
@@ -192,7 +216,14 @@ export function MultiChart({ data, series, height = 420 }: Props) {
     plot.current?.setData(shape(data, series.length));
   }, [data, series]);
 
+  // Masquer/afficher une série sans recréer le plot (préserve zoom & co).
+  useEffect(() => {
+    const u = plot.current;
+    if (!u) return;
+    series.forEach((s, i) => u.setSeries(i + 1, { show: !s.hidden }));
+  }, [series]);
+
   useEffect(() => () => plot.current?.destroy(), []);
 
   return <div ref={ref} className="multichart" />;
-}
+});

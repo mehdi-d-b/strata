@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type uPlot from "uplot";
-import { MultiChart, type SeriesDef } from "./MultiChart";
+import { Download, Pause, Play, RotateCcw } from "lucide-react";
+import { MultiChart, type ChartApi, type SeriesDef } from "./MultiChart";
 import { useRealtimeBuffers } from "./useRealtimeBuffers";
 import { CommandBox } from "./CommandBox";
+import { Button } from "@/components/ui/button";
 import { useTheme } from "./theme";
 import { chartPalette } from "./chartTheme";
 import { fetchHistory, fetchTags, tagLabel, type Tag } from "./api";
@@ -22,6 +24,7 @@ type Selected = {
   unit?: string | null;
   idx: number;
   axis: "left" | "right";
+  hidden?: boolean;
 };
 
 /** Côté par défaut d'une nouvelle série : même unité qu'un côté existant -> ce
@@ -43,8 +46,20 @@ export function LiveView() {
   const [selected, setSelected] = useState<Selected[]>([]);
   const [windowSec, setWindowSec] = useState(300);
   const [live, setLive] = useState(false);
+  const [paused, setPaused] = useState(false);
 
   const [data, setData] = useState<uPlot.AlignedData>([[]]);
+
+  // Pause du live : on gèle l'arrivée des frames (les buffers continuent de
+  // tourner ; à la reprise, on saute à l'instant présent).
+  const pausedRef = useRef(false);
+  pausedRef.current = paused;
+  const handleFrame = useCallback((d: uPlot.AlignedData) => {
+    if (!pausedRef.current) setData(d);
+  }, []);
+
+  // API impérative du graphe (reset zoom).
+  const chartApiRef = useRef<ChartApi>(null);
 
   // Palette résolue dans le thème courant (se met à jour au toggle clair/sombre).
   const { theme } = useTheme();
@@ -60,6 +75,7 @@ export function LiveView() {
         color: colorOf(s.idx),
         unit: s.unit,
         axis: s.axis,
+        hidden: s.hidden,
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [selected, palette],
@@ -100,7 +116,7 @@ export function LiveView() {
     tags: selectedTags,
     windowSec,
     fps: 30,
-    onFrame: setData,
+    onFrame: handleFrame,
     onLive: setLive,
   });
 
@@ -146,9 +162,38 @@ export function LiveView() {
   const setAxis = (tag: string, axis: "left" | "right") =>
     setSelected((cur) => cur.map((s) => (s.tag === tag ? { ...s, axis } : s)));
 
+  const toggleHidden = (tag: string) =>
+    setSelected((cur) =>
+      cur.map((s) => (s.tag === tag ? { ...s, hidden: !s.hidden } : s)),
+    );
+
   const removeAll = () => {
     clear();
     setSelected([]);
+  };
+
+  // Export CSV de la fenêtre courante : time ISO + une colonne par série.
+  const exportCsv = () => {
+    const xs = data[0] as number[] | undefined;
+    if (!xs || xs.length === 0) return;
+    const cols = seriesForChart.map((_, i) => data[i + 1] as (number | null)[] | undefined);
+    const esc = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const header = ["time", ...seriesForChart.map((s) => esc(s.label))].join(",");
+    const lines = xs.map((t, r) => {
+      const vals = cols.map((c) => {
+        const v = c?.[r];
+        return v == null ? "" : String(v);
+      });
+      return [new Date(t * 1000).toISOString(), ...vals].join(",");
+    });
+    const csv = [header, ...lines].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `strata-export-${new Date().toISOString().slice(0, 19)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -194,13 +239,32 @@ export function LiveView() {
               </button>
             ))}
           </div>
-          <span className={`status ${live ? "live" : "off"}`}>
-            {live ? "● live" : "○ déconnecté"}
+          <span className={`status ${paused ? "off" : live ? "live" : "off"}`}>
+            {paused ? "❚❚ en pause" : live ? "● live" : "○ déconnecté"}
           </span>
           {selected.length > 0 && (
-            <button className="ghost" onClick={removeAll}>
-              Tout retirer
-            </button>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+              <Button variant="outline" size="sm" onClick={() => setPaused((p) => !p)}>
+                {paused ? <Play /> : <Pause />}
+                {paused ? "Reprendre" : "Pause"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => chartApiRef.current?.resetZoom()}
+                title="Réinitialiser le zoom"
+              >
+                <RotateCcw />
+                Reset zoom
+              </Button>
+              <Button variant="outline" size="sm" onClick={exportCsv} title="Exporter en CSV">
+                <Download />
+                CSV
+              </Button>
+              <Button variant="ghost" size="sm" onClick={removeAll}>
+                Tout retirer
+              </Button>
+            </div>
           )}
         </div>
 
@@ -208,9 +272,15 @@ export function LiveView() {
         {selected.length > 0 && (
           <div className="series-chips">
             {selected.map((s, i) => (
-              <span key={s.tag} className="series-chip">
-                <span className="dot" style={{ background: colorOf(s.idx) }} />
-                <span className="series-chip-label">{s.label}</span>
+              <span key={s.tag} className={`series-chip ${s.hidden ? "off" : ""}`}>
+                <button
+                  className="series-chip-main"
+                  onClick={() => toggleHidden(s.tag)}
+                  title={s.hidden ? "Afficher la série" : "Masquer la série"}
+                >
+                  <span className="dot" style={{ background: colorOf(s.idx) }} />
+                  <span className="series-chip-label">{s.label}</span>
+                </button>
                 <span className="series-chip-val tabular-nums">
                   {latest[i] == null ? "—" : latest[i]!.toFixed(2)}
                   {s.unit ? ` ${s.unit}` : ""}
@@ -240,7 +310,7 @@ export function LiveView() {
               Sélectionne un ou plusieurs tags à gauche pour tracer leurs courbes.
             </div>
           ) : (
-            <MultiChart data={data} series={seriesForChart} />
+            <MultiChart ref={chartApiRef} data={data} series={seriesForChart} />
           )}
         </div>
 
