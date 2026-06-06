@@ -9,48 +9,9 @@ body {
   color: var(--foreground);
 }
 
-header {
-  padding: 16px 24px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-header h1 {
-  margin: 0;
-  font-size: 18px;
-  letter-spacing: 0.5px;
-}
-
-header .sub {
-  font-size: 12px;
-  color: var(--muted-foreground);
-}
-
-nav {
-  display: flex;
-  gap: 8px;
-}
-
-nav button,
-nav a {
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--muted-foreground);
-  padding: 6px 14px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  text-decoration: none;
-}
-
-nav button.active,
-nav a.active {
-  background: var(--secondary);
-  border-color: var(--border);
-  color: var(--foreground);
-}
+/* L'ancien bandeau horizontal (header + nav global) a été remplacé par la
+   sidebar (components/Sidebar.tsx). Ses règles globales sont supprimées : elles
+   écrasaient le layout de la sidebar (nav { display:flex } la mettait en ligne). */
 
 main {
   padding: 24px;
