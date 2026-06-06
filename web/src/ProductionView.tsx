@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import {
   ROLES,
@@ -16,9 +16,9 @@ import {
   type TagRoleRow,
 } from "./api";
 import { PageHeader } from "@/components/PageHeader";
+import { Section } from "@/components/Section";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -35,30 +35,6 @@ function scrapRate(r: ProductionRow): string {
   const total = ok + scrap;
   if (!total) return "—";
   return `${((scrap / total) * 100).toFixed(1)} %`;
-}
-
-/** Section encartée : titre + action optionnelle + contenu + indice. */
-function Section({
-  title,
-  action,
-  children,
-  hint,
-}: {
-  title: string;
-  action?: ReactNode;
-  children: ReactNode;
-  hint?: ReactNode;
-}) {
-  return (
-    <Card className="gap-4 py-5">
-      <div className="flex items-center justify-between px-6">
-        <h2 className="text-base font-semibold">{title}</h2>
-        {action}
-      </div>
-      <CardContent className="px-6">{children}</CardContent>
-      {hint && <p className="px-6 text-xs text-muted-foreground">{hint}</p>}
-    </Card>
-  );
 }
 
 export function ProductionView() {
