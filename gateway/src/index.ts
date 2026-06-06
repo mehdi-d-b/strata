@@ -12,6 +12,7 @@
  * (value * scale + offset) est appliqué À LA LECTURE, ici, à partir de la
  * table `tags`. Corriger une échelle répare donc tout l'historique d'un coup.
  */
+import { randomUUID } from "node:crypto";
 import Fastify from "fastify";
 import websocket from "@fastify/websocket";
 import { Kafka, logLevel } from "kafkajs";
@@ -310,6 +311,69 @@ app.get("/api/system", { preHandler: requireAdmin }, async () => {
     node_version: process.version,
     connectors,
   };
+});
+
+// ─── Dashboards (pages multi-plots sauvegardées, privées par utilisateur) ──
+// `spec` est opaque (jsonb non validé) : le front en est seul maître.
+// Isolation stricte par propriétaire ; accès au dashboard d'autrui -> 404.
+
+app.get("/api/dashboards", { preHandler: requireAuth }, async (req) => {
+  const { rows } = await pool.query(
+    `SELECT id, name, updated_at FROM dashboards
+     WHERE owner_id = $1 ORDER BY updated_at DESC`,
+    [req.user!.id],
+  );
+  return rows;
+});
+
+app.get("/api/dashboards/:id", { preHandler: requireAuth }, async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const { rows } = await pool.query(
+    "SELECT id, name, spec, updated_at FROM dashboards WHERE id = $1 AND owner_id = $2",
+    [id, req.user!.id],
+  );
+  if (rows.length === 0) return reply.code(404).send({ error: "introuvable" });
+  return rows[0];
+});
+
+app.post("/api/dashboards", { preHandler: requireAuth }, async (req, reply) => {
+  const b = req.body as { name?: string; spec?: unknown };
+  if (!b.name?.trim()) return reply.code(400).send({ error: "name requis" });
+  const id = randomUUID();
+  const { rows } = await pool.query(
+    `INSERT INTO dashboards (id, owner_id, name, spec)
+     VALUES ($1, $2, $3, $4::jsonb)
+     RETURNING id, name, spec, updated_at`,
+    [id, req.user!.id, b.name.trim(), JSON.stringify(b.spec ?? {})],
+  );
+  await audit(req.user!.username, "dashboard.create", id, { name: b.name });
+  return rows[0];
+});
+
+app.put("/api/dashboards/:id", { preHandler: requireAuth }, async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const b = req.body as { name?: string; spec?: unknown };
+  if (!b.name?.trim()) return reply.code(400).send({ error: "name requis" });
+  const { rows } = await pool.query(
+    `UPDATE dashboards SET name = $3, spec = $4::jsonb, updated_at = now()
+     WHERE id = $1 AND owner_id = $2
+     RETURNING id, name, spec, updated_at`,
+    [id, req.user!.id, b.name.trim(), JSON.stringify(b.spec ?? {})],
+  );
+  if (rows.length === 0) return reply.code(404).send({ error: "introuvable" });
+  await audit(req.user!.username, "dashboard.update", id);
+  return rows[0];
+});
+
+app.delete("/api/dashboards/:id", { preHandler: requireAuth }, async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const r = await pool.query(
+    "DELETE FROM dashboards WHERE id = $1 AND owner_id = $2",
+    [id, req.user!.id],
+  );
+  if (r.rowCount === 0) return reply.code(404).send({ error: "introuvable" });
+  await audit(req.user!.username, "dashboard.delete", id);
+  return reply.code(204).send();
 });
 
 // ─── Écriture de consigne (Phase 8) ───────────────────────────────────────
