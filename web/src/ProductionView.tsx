@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { Plus, Trash2 } from "lucide-react";
 import {
   ROLES,
   deleteShift,
@@ -14,6 +15,18 @@ import {
   type Tag,
   type TagRoleRow,
 } from "./api";
+import { PageHeader } from "@/components/PageHeader";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 /** Taux de rebut = scrap / (ok + scrap). */
 function scrapRate(r: ProductionRow): string {
@@ -22,6 +35,30 @@ function scrapRate(r: ProductionRow): string {
   const total = ok + scrap;
   if (!total) return "—";
   return `${((scrap / total) * 100).toFixed(1)} %`;
+}
+
+/** Section encartée : titre + action optionnelle + contenu + indice. */
+function Section({
+  title,
+  action,
+  children,
+  hint,
+}: {
+  title: string;
+  action?: ReactNode;
+  children: ReactNode;
+  hint?: ReactNode;
+}) {
+  return (
+    <Card className="gap-4 py-5">
+      <div className="flex items-center justify-between px-6">
+        <h2 className="text-base font-semibold">{title}</h2>
+        {action}
+      </div>
+      <CardContent className="px-6">{children}</CardContent>
+      {hint && <p className="px-6 text-xs text-muted-foreground">{hint}</p>}
+    </Card>
+  );
 }
 
 export function ProductionView() {
@@ -62,63 +99,77 @@ export function ProductionView() {
     setShifts((s) => s.map((row, idx) => (idx === i ? { ...row, ...p } : row)));
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+    <>
+      <PageHeader
+        title="Production"
+        description="Sorties par shift, rôles des compteurs et planning."
+      />
+
       {/* ─── Tableau de production ─────────────────────────────── */}
-      <div className="card">
-        <h2 className="card-title">Production par shift</h2>
-        <table className="tags">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Shift</th>
-              <th>OK</th>
-              <th>Rebut</th>
-              <th>Produit</th>
-              <th>Dispo</th>
-              <th>Taux rebut</th>
-            </tr>
-          </thead>
-          <tbody>
+      <Section title="Production par shift">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Date</TableHead>
+              <TableHead>Shift</TableHead>
+              <TableHead>OK</TableHead>
+              <TableHead>Rebut</TableHead>
+              <TableHead>Produit</TableHead>
+              <TableHead>Dispo</TableHead>
+              <TableHead>Taux rebut</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {prod.map((r) => (
-              <tr key={`${r.day}-${r.shift_no}`}>
-                <td>{r.day.slice(0, 10)}</td>
-                <td>{r.shift_label ?? `#${r.shift_no}`}</td>
-                <td>{r.ok ?? "—"}</td>
-                <td style={{ color: r.scrap ? "var(--warn)" : undefined }}>
+              <TableRow key={`${r.day}-${r.shift_no}`}>
+                <TableCell className="tabular-nums">{r.day.slice(0, 10)}</TableCell>
+                <TableCell>{r.shift_label ?? `#${r.shift_no}`}</TableCell>
+                <TableCell className="tabular-nums">{r.ok ?? "—"}</TableCell>
+                <TableCell className={`tabular-nums ${r.scrap ? "text-warn" : ""}`}>
                   {r.scrap ?? "—"}
-                </td>
-                <td>{r.produced ?? "—"}</td>
-                <td>{r.available ?? "—"}</td>
-                <td>{scrapRate(r)}</td>
-              </tr>
+                </TableCell>
+                <TableCell className="tabular-nums">{r.produced ?? "—"}</TableCell>
+                <TableCell className="tabular-nums">{r.available ?? "—"}</TableCell>
+                <TableCell className="tabular-nums">{scrapRate(r)}</TableCell>
+              </TableRow>
             ))}
             {prod.length === 0 && (
-              <tr>
-                <td colSpan={7} style={{ color: "var(--muted-foreground)" }}>
+              <TableRow>
+                <TableCell colSpan={7} className="text-muted-foreground">
                   Aucune production calculée. Mappe des tags compteurs à des rôles
                   ci-dessous (OK / rebut…).
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             )}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </Section>
 
       {/* ─── Mapping des rôles ─────────────────────────────────── */}
-      <div className="card">
-        <h2 className="card-title">Rôles des compteurs</h2>
-        <table className="tags">
-          <thead>
-            <tr>
-              <th>Tag</th>
-              <th>Rôle de production</th>
-            </tr>
-          </thead>
-          <tbody>
+      <Section
+        title="Rôles des compteurs"
+        hint={
+          <>
+            Déclare quel compteur représente quoi. <code>ok</code> = pièces bonnes,{" "}
+            <code>scrap</code> = rebut, <code>produced</code> = total,{" "}
+            <code>available</code> = disponibles.
+          </>
+        }
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Tag</TableHead>
+              <TableHead>Rôle de production</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {tags.map((t) => (
-              <tr key={t.name}>
-                <td><code>{t.name}</code></td>
-                <td>
+              <TableRow key={t.name}>
+                <TableCell>
+                  <code className="text-[var(--chart-2)]">{t.name}</code>
+                </TableCell>
+                <TableCell>
                   <select
                     value={roleOf(t.name)}
                     onChange={(e) => onRoleChange(t.name, e.target.value as Role | "")}
@@ -130,106 +181,113 @@ export function ProductionView() {
                       </option>
                     ))}
                   </select>
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-        <p className="hint">
-          Déclare quel compteur représente quoi. <code>ok</code> = pièces bonnes,{" "}
-          <code>scrap</code> = rebut, <code>produced</code> = total,{" "}
-          <code>available</code> = disponibles.
-        </p>
-      </div>
+          </TableBody>
+        </Table>
+      </Section>
 
       {/* ─── Planning de shifts versionné ──────────────────────── */}
-      <div className="card">
-        <h2 className="card-title">
-          Planning de shifts
-          <button className="add" onClick={addShiftRow}>
-            + Ajouter
-          </button>
-        </h2>
-        <table className="tags">
-          <thead>
-            <tr>
-              <th>Valable à partir du</th>
-              <th>N°</th>
-              <th>Libellé</th>
-              <th>Début</th>
-              <th>Fin</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
+      <Section
+        title="Planning de shifts"
+        action={
+          <Button size="sm" variant="outline" onClick={addShiftRow}>
+            <Plus />
+            Ajouter
+          </Button>
+        }
+        hint={
+          <>
+            Le planning est <strong>versionné</strong> : pour passer de 2 à 3 shifts
+            ou changer des horaires, ajoute des lignes avec une nouvelle date d'effet.
+            L'historique d'avant garde son ancienne config.
+          </>
+        }
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Valable à partir du</TableHead>
+              <TableHead>N°</TableHead>
+              <TableHead>Libellé</TableHead>
+              <TableHead>Début</TableHead>
+              <TableHead>Fin</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {shifts.map((s, i) => (
-              <tr key={`${s.valid_from}-${s.shift_no}-${i}`}>
-                <td>
-                  <input
+              <TableRow key={`${s.valid_from}-${s.shift_no}-${i}`}>
+                <TableCell>
+                  <Input
                     type="date"
+                    className="w-40"
                     value={s.valid_from.slice(0, 10)}
                     onChange={(e) => patchShift(i, { valid_from: e.target.value })}
                   />
-                </td>
-                <td>
-                  <input
-                    className="narrow"
+                </TableCell>
+                <TableCell>
+                  <Input
                     type="number"
+                    className="w-16"
                     value={s.shift_no}
                     onChange={(e) => patchShift(i, { shift_no: Number(e.target.value) })}
                   />
-                </td>
-                <td>
-                  <input
+                </TableCell>
+                <TableCell>
+                  <Input
+                    className="w-48"
                     value={s.label ?? ""}
                     onChange={(e) => patchShift(i, { label: e.target.value })}
                   />
-                </td>
-                <td>
-                  <input
-                    className="narrow"
+                </TableCell>
+                <TableCell>
+                  <Input
                     type="time"
+                    className="w-28"
                     value={s.start_time.slice(0, 5)}
                     onChange={(e) => patchShift(i, { start_time: e.target.value })}
                   />
-                </td>
-                <td>
-                  <input
-                    className="narrow"
+                </TableCell>
+                <TableCell>
+                  <Input
                     type="time"
+                    className="w-28"
                     value={s.end_time.slice(0, 5)}
                     onChange={(e) => patchShift(i, { end_time: e.target.value })}
                   />
-                </td>
-                <td>
-                  <button
-                    onClick={async () => {
-                      await saveShift(s);
-                      setTimeout(() => fetchProduction(7).then(setProd), 300);
-                    }}
-                  >
-                    Enregistrer
-                  </button>
-                  <button
-                    className="ghost"
-                    onClick={async () => {
-                      await deleteShift(s.valid_from, s.shift_no);
-                      loadAll();
-                    }}
-                  >
-                    ✕
-                  </button>
-                </td>
-              </tr>
+                </TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      size="sm"
+                      onClick={async () => {
+                        await saveShift(s);
+                        setTimeout(() => fetchProduction(7).then(setProd), 300);
+                      }}
+                    >
+                      Enregistrer
+                    </Button>
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive"
+                      title="Supprimer"
+                      onClick={async () => {
+                        await deleteShift(s.valid_from, s.shift_no);
+                        loadAll();
+                      }}
+                    >
+                      <Trash2 />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-        <p className="hint">
-          Le planning est <strong>versionné</strong> : pour passer de 2 à 3 shifts
-          ou changer des horaires, ajoute des lignes avec une nouvelle date d'effet.
-          L'historique d'avant garde son ancienne config.
-        </p>
-      </div>
-    </div>
+          </TableBody>
+        </Table>
+      </Section>
+    </>
   );
 }
