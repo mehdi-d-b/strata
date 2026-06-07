@@ -63,7 +63,8 @@ function since(iso: string): string {
 export function AlarmsView() {
   const { user } = useAuth();
   const admin = userIsAdmin(user);
-  const { alarms, ack } = useAlarms();
+  const { alarms, ack, ackAll } = useAlarms();
+  const unacked = alarms.filter((a) => !a.acked).length;
 
   return (
     <>
@@ -72,7 +73,17 @@ export function AlarmsView() {
         description="Alarmes actives et configuration des seuils."
       />
 
-      <Section title="Alarmes courantes">
+      <Section
+        title="Alarmes courantes"
+        action={
+          unacked > 0 ? (
+            <Button size="sm" variant="outline" onClick={() => ackAll()}>
+              <Check />
+              Tout acquitter ({unacked})
+            </Button>
+          ) : undefined
+        }
+      >
         <Table>
           <TableHeader>
             <TableRow>

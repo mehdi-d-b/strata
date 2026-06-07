@@ -8,9 +8,15 @@ export type Prefs = {
   defaultWindowSec: number;
   /** Densité d'affichage (espacements). */
   density: Density;
+  /** Afficher les toasts à l'apparition d'une alarme. */
+  alarmToasts: boolean;
 };
 
-const DEFAULTS: Prefs = { defaultWindowSec: 300, density: "comfortable" };
+const DEFAULTS: Prefs = {
+  defaultWindowSec: 300,
+  density: "comfortable",
+  alarmToasts: true,
+};
 
 export function loadPrefs(): Prefs {
   try {
