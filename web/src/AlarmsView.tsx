@@ -16,6 +16,7 @@ import { useAuth } from "./auth";
 import { readSpreadsheet, rowsToRules } from "./alarmImport";
 import { PageHeader } from "@/components/PageHeader";
 import { Section } from "@/components/Section";
+import { TabBar } from "@/components/TabBar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -60,11 +61,12 @@ function since(iso: string): string {
   return new Date(iso).toLocaleString();
 }
 
+type Tab = "current" | "rules";
+
 export function AlarmsView() {
   const { user } = useAuth();
   const admin = userIsAdmin(user);
-  const { alarms, ack, ackAll } = useAlarms();
-  const unacked = alarms.filter((a) => !a.acked).length;
+  const [tab, setTab] = useState<Tab>("current");
 
   return (
     <>
@@ -72,76 +74,176 @@ export function AlarmsView() {
         title="Alarmes"
         description="Alarmes actives et configuration des seuils."
       />
-
-      <Section
-        title="Alarmes courantes"
-        action={
-          unacked > 0 ? (
-            <Button size="sm" variant="outline" onClick={() => ackAll()}>
-              <Check />
-              Tout acquitter ({unacked})
-            </Button>
-          ) : undefined
-        }
-      >
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Sévérité</TableHead>
-              <TableHead>Tag</TableHead>
-              <TableHead>Message</TableHead>
-              <TableHead>Depuis</TableHead>
-              <TableHead>État</TableHead>
-              <TableHead />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {alarms.map((a) => (
-              <TableRow key={a.id}>
-                <TableCell>
-                  <SeverityBadge severity={a.severity} />
-                </TableCell>
-                <TableCell>
-                  <code className="text-[var(--chart-2)]">{a.tag}</code>
-                </TableCell>
-                <TableCell>{a.message}</TableCell>
-                <TableCell className="tabular-nums text-muted-foreground">
-                  {since(a.raised_at)}
-                </TableCell>
-                <TableCell>
-                  {a.state === "active" ? (
-                    <span className="text-bad">● active</span>
-                  ) : (
-                    <span className="text-muted-foreground">○ rétablie</span>
-                  )}
-                </TableCell>
-                <TableCell>
-                  {a.acked ? (
-                    <span className="text-xs text-muted-foreground">
-                      acq. {a.acked_by ?? ""}
-                    </span>
-                  ) : (
-                    <Button size="sm" variant="outline" onClick={() => ack(a.id)}>
-                      <Check />
-                      Acquitter
-                    </Button>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-            {alarms.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={6} className="text-muted-foreground">
-                  Aucune alarme. Tout est nominal.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Section>
-
-      {admin && <RulesSection />}
+      {admin && (
+        <TabBar
+          tabs={[
+            { id: "current", label: "Alarmes courantes" },
+            { id: "rules", label: "Règles de seuil" },
+          ]}
+          value={tab}
+          onChange={setTab}
+        />
+      )}
+      {(!admin || tab === "current") && <CurrentSection />}
+      {admin && tab === "rules" && <RulesSection />}
     </>
+  );
+}
+
+// ─── Alarmes courantes (résumé + filtres + liste) ────────────────────────
+
+const SEVERITIES: Severity[] = ["critical", "warning", "info"];
+
+function FilterChip({
+  label,
+  count,
+  active,
+  tone,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  tone?: Severity;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition-colors",
+        active ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground",
+        tone ? SEV_CLASS[tone] : "border-border",
+      )}
+    >
+      {label}
+      <span className="tabular-nums font-semibold">{count}</span>
+    </button>
+  );
+}
+
+function CurrentSection() {
+  const { alarms, ack, ackAll } = useAlarms();
+  const [sev, setSev] = useState<Severity | "all">("all");
+  const [onlyUnacked, setOnlyUnacked] = useState(false);
+  const [state, setState] = useState<"all" | "active" | "cleared">("all");
+
+  const bySev: Record<Severity, number> = { critical: 0, warning: 0, info: 0 };
+  for (const a of alarms) bySev[a.severity] += 1;
+  const unacked = alarms.filter((a) => !a.acked).length;
+
+  const filtered = alarms.filter(
+    (a) =>
+      (sev === "all" || a.severity === sev) &&
+      (!onlyUnacked || !a.acked) &&
+      (state === "all" || a.state === state),
+  );
+
+  const toggleSev = (s: Severity) => setSev((cur) => (cur === s ? "all" : s));
+
+  return (
+    <Section
+      title="Alarmes courantes"
+      action={
+        unacked > 0 ? (
+          <Button size="sm" variant="outline" onClick={() => ackAll()}>
+            <Check />
+            Tout acquitter ({unacked})
+          </Button>
+        ) : undefined
+      }
+    >
+      {/* Résumé par sévérité (cliquable = filtre) + filtres */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <FilterChip
+          label="Toutes"
+          count={alarms.length}
+          active={sev === "all"}
+          onClick={() => setSev("all")}
+        />
+        {SEVERITIES.map((s) => (
+          <FilterChip
+            key={s}
+            label={SEV_LABEL[s]}
+            count={bySev[s]}
+            tone={s}
+            active={sev === s}
+            onClick={() => toggleSev(s)}
+          />
+        ))}
+        <span className="mx-1 h-5 w-px bg-border" />
+        <select value={state} onChange={(e) => setState(e.target.value as typeof state)}>
+          <option value="all">Tous états</option>
+          <option value="active">Actives</option>
+          <option value="cleared">Rétablies</option>
+        </select>
+        <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={onlyUnacked}
+            onChange={(e) => setOnlyUnacked(e.target.checked)}
+          />
+          Non acquittées
+        </label>
+      </div>
+
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Sévérité</TableHead>
+            <TableHead>Tag</TableHead>
+            <TableHead>Message</TableHead>
+            <TableHead>Depuis</TableHead>
+            <TableHead>État</TableHead>
+            <TableHead />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {filtered.map((a) => (
+            <TableRow key={a.id}>
+              <TableCell>
+                <SeverityBadge severity={a.severity} />
+              </TableCell>
+              <TableCell>
+                <code className="text-[var(--chart-2)]">{a.tag}</code>
+              </TableCell>
+              <TableCell>{a.message}</TableCell>
+              <TableCell className="tabular-nums text-muted-foreground">
+                {since(a.raised_at)}
+              </TableCell>
+              <TableCell>
+                {a.state === "active" ? (
+                  <span className="text-bad">● active</span>
+                ) : (
+                  <span className="text-muted-foreground">○ rétablie</span>
+                )}
+              </TableCell>
+              <TableCell>
+                {a.acked ? (
+                  <span className="text-xs text-muted-foreground">
+                    acq. {a.acked_by ?? ""}
+                  </span>
+                ) : (
+                  <Button size="sm" variant="outline" onClick={() => ack(a.id)}>
+                    <Check />
+                    Acquitter
+                  </Button>
+                )}
+              </TableCell>
+            </TableRow>
+          ))}
+          {filtered.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={6} className="text-muted-foreground">
+                {alarms.length === 0
+                  ? "Aucune alarme. Tout est nominal."
+                  : "Aucune alarme ne correspond aux filtres."}
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+    </Section>
   );
 }
 
@@ -330,6 +432,13 @@ function RulesSection() {
               </TableCell>
             </TableRow>
           ))}
+          {rules.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={7} className="text-muted-foreground">
+                Aucune règle. Ajoute-en une ci-dessous ou importe un fichier.
+              </TableCell>
+            </TableRow>
+          )}
         </TableBody>
       </Table>
 
