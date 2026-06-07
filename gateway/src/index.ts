@@ -31,6 +31,7 @@ import {
   type AuthUser,
 } from "./auth.js";
 import { deployDevice, undeployDevice } from "./plc4x.js";
+import { AlarmEngine } from "./alarms.js";
 
 const KAFKA_BROKERS = (process.env.KAFKA_BROKERS ?? "redpanda:9092").split(",");
 const PG_DSN =
@@ -138,6 +139,9 @@ async function audit(
     [username, action, target, detail ? JSON.stringify(detail) : null],
   );
 }
+
+// Moteur d'alarmes (détection de seuils sur tags.raw). Démarré dans main().
+const alarmEngine = new AlarmEngine(pool, audit);
 
 // Sur chaque requête : résout l'utilisateur courant depuis le cookie de session.
 app.addHook("preHandler", async (req) => {
@@ -374,6 +378,116 @@ app.delete("/api/dashboards/:id", { preHandler: requireAuth }, async (req, reply
   if (r.rowCount === 0) return reply.code(404).send({ error: "introuvable" });
   await audit(req.user!.username, "dashboard.delete", id);
   return reply.code(204).send();
+});
+
+// ─── Alarmes — règles de seuils (config, admin) ───────────────────────────
+
+const ALARM_OPERATORS = [">", ">=", "<", "<=", "==", "!="];
+const ALARM_SEVERITIES = ["critical", "warning", "info"];
+
+/** Valide et normalise le corps d'une règle d'alarme. Renvoie une erreur (string) ou null. */
+function validateRule(b: Record<string, unknown>): string | null {
+  if (!b.tag || typeof b.tag !== "string") return "tag requis";
+  if (!ALARM_OPERATORS.includes(b.operator as string)) return "operator invalide";
+  if (typeof b.threshold !== "number") return "threshold doit être un nombre";
+  if (!ALARM_SEVERITIES.includes(b.severity as string)) return "severity invalide";
+  return null;
+}
+
+app.get("/api/alarm-rules", { preHandler: requireAdmin }, async () => {
+  const { rows } = await pool.query(
+    `SELECT id, tag, operator, threshold, severity, message, for_ms, hysteresis, enabled
+     FROM alarm_rules ORDER BY tag, threshold`,
+  );
+  return rows;
+});
+
+app.post("/api/alarm-rules", { preHandler: requireAdmin }, async (req, reply) => {
+  const b = req.body as Record<string, unknown>;
+  const err = validateRule(b);
+  if (err) return reply.code(400).send({ error: err });
+  const id = randomUUID();
+  const { rows } = await pool.query(
+    `INSERT INTO alarm_rules (id, tag, operator, threshold, severity, message, for_ms, hysteresis, enabled)
+     VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,0),COALESCE($8,0),COALESCE($9,true))
+     RETURNING id, tag, operator, threshold, severity, message, for_ms, hysteresis, enabled`,
+    [id, b.tag, b.operator, b.threshold, b.severity, b.message ?? null, b.for_ms, b.hysteresis, b.enabled],
+  );
+  await alarmEngine.refresh();
+  await audit(req.user!.username, "alarm-rule.create", b.tag as string);
+  return rows[0];
+});
+
+app.put("/api/alarm-rules/:id", { preHandler: requireAdmin }, async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const b = req.body as Record<string, unknown>;
+  const err = validateRule(b);
+  if (err) return reply.code(400).send({ error: err });
+  const { rows } = await pool.query(
+    `UPDATE alarm_rules SET tag=$2, operator=$3, threshold=$4, severity=$5,
+       message=$6, for_ms=COALESCE($7,0), hysteresis=COALESCE($8,0), enabled=COALESCE($9,true)
+     WHERE id=$1
+     RETURNING id, tag, operator, threshold, severity, message, for_ms, hysteresis, enabled`,
+    [id, b.tag, b.operator, b.threshold, b.severity, b.message ?? null, b.for_ms, b.hysteresis, b.enabled],
+  );
+  if (rows.length === 0) return reply.code(404).send({ error: "introuvable" });
+  await alarmEngine.refresh();
+  await audit(req.user!.username, "alarm-rule.update", id);
+  return rows[0];
+});
+
+app.delete("/api/alarm-rules/:id", { preHandler: requireAdmin }, async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const r = await pool.query("DELETE FROM alarm_rules WHERE id = $1", [id]);
+  if (r.rowCount === 0) return reply.code(404).send({ error: "introuvable" });
+  await alarmEngine.refresh();
+  await audit(req.user!.username, "alarm-rule.delete", id);
+  return reply.code(204).send();
+});
+
+// ─── Alarmes — consultation & acquittement (requireAuth) ──────────────────
+
+// Set "courant" : actives OU (clôturées non acquittées). Trié raised_at desc.
+app.get("/api/alarms", { preHandler: requireAuth }, async () => {
+  const { rows } = await pool.query(
+    `SELECT id, rule_id, source, tag, severity, message, value, state,
+            raised_at, cleared_at, acked, acked_by, acked_at
+     FROM alarms
+     WHERE state = 'active' OR (state = 'cleared' AND acked = false)
+     ORDER BY raised_at DESC`,
+  );
+  return rows;
+});
+
+app.post("/api/alarms/:id/ack", { preHandler: requireAuth }, async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const { rows } = await pool.query(
+    `UPDATE alarms SET acked = true, acked_by = $2, acked_at = now()
+     WHERE id = $1
+     RETURNING id, rule_id, source, tag, severity, message, value, state,
+               raised_at, cleared_at, acked, acked_by, acked_at`,
+    [id, req.user!.username],
+  );
+  if (rows.length === 0) return reply.code(404).send({ error: "introuvable" });
+  await audit(req.user!.username, "alarm.ack", rows[0].tag);
+  return rows[0];
+});
+
+// Historique des alarmes (pour plus tard).
+app.get("/api/alarms/history", { preHandler: requireAuth }, async (req) => {
+  const q = req.query as { from?: string; to?: string; limit?: string };
+  const limit = Math.min(1000, Number(q.limit) || 200);
+  const from = q.from ? new Date(q.from) : new Date(Date.now() - 7 * 86400_000);
+  const to = q.to ? new Date(q.to) : new Date();
+  const { rows } = await pool.query(
+    `SELECT id, rule_id, source, tag, severity, message, value, state,
+            raised_at, cleared_at, acked, acked_by, acked_at
+     FROM alarms
+     WHERE raised_at >= $1 AND raised_at <= $2
+     ORDER BY raised_at DESC LIMIT $3`,
+    [from.toISOString(), to.toISOString(), limit],
+  );
+  return rows;
 });
 
 // ─── Écriture de consigne (Phase 8) ───────────────────────────────────────
@@ -863,8 +977,13 @@ async function startConsumer() {
       }
       // Auto-découverte : un nouveau tag apparaît -> on crée sa config par défaut.
       if (!tagCache.has(m.tag)) await ensureTagExists(m.tag);
+      const value = scaled(m.tag, m.value);
+      // Détection d'alarmes sur la valeur SCALÉE (seuils en unité métier).
+      alarmEngine.onMeasure(m.tag, value).catch((e) =>
+        app.log.error(`alarme: ${(e as Error).message}`),
+      );
       // On pousse la valeur SCALÉE au navigateur (cohérent avec l'historique).
-      const out = JSON.stringify({ ...m, value: scaled(m.tag, m.value) });
+      const out = JSON.stringify({ ...m, value });
       for (const ws of clients) {
         if (ws.readyState === 1) ws.send(out); // 1 = OPEN
       }
@@ -906,6 +1025,12 @@ async function main() {
   await seedAdmin();
   await refreshTagCache();
   setInterval(() => refreshTagCache().catch(() => {}), 10_000); // garde le cache frais
+
+  // Moteur d'alarmes : charge les règles, resynchronise l'état actif, puis
+  // rafraîchit les règles périodiquement (les modifs via l'UI sont prises en compte).
+  await alarmEngine.refresh();
+  await alarmEngine.hydrate();
+  setInterval(() => alarmEngine.refresh().catch(() => {}), 10_000);
   await app.listen({ host: "0.0.0.0", port: PORT });
   for (;;) {
     try {
