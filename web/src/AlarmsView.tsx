@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Check, Plus, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Check, Plus, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import {
   ALARM_OPERATORS,
@@ -13,6 +13,7 @@ import {
 } from "./api";
 import { useAlarms } from "./alarms";
 import { useAuth } from "./auth";
+import { readSpreadsheet, rowsToRules } from "./alarmImport";
 import { PageHeader } from "@/components/PageHeader";
 import { Section } from "@/components/Section";
 import { Button } from "@/components/ui/button";
@@ -147,11 +148,27 @@ const BLANK = {
 function RulesSection() {
   const [rules, setRules] = useState<AlarmRule[]>([]);
   const [nu, setNu] = useState({ ...BLANK });
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const load = () => fetchAlarmRules().then(setRules).catch(() => setRules([]));
   useEffect(() => {
     load();
   }, []);
+
+  const onImport = async (file: File) => {
+    try {
+      const parsed = rowsToRules(await readSpreadsheet(file));
+      if (parsed.length === 0) {
+        toast.error("Aucune règle valide dans le fichier.");
+        return;
+      }
+      await Promise.all(parsed.map((r) => saveAlarmRule(r)));
+      toast.success(`${parsed.length} règle(s) importée(s).`);
+      load();
+    } catch {
+      toast.error("Import impossible.");
+    }
+  };
 
   const patch = (id: string, p: Partial<AlarmRule>) =>
     setRules((rs) => rs.map((r) => (r.id === id ? { ...r, ...p } : r)));
@@ -189,10 +206,31 @@ function RulesSection() {
   return (
     <Section
       title="Règles de seuil"
+      action={
+        <>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".csv,.xlsx"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) onImport(f);
+              e.target.value = "";
+            }}
+          />
+          <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()}>
+            <Upload />
+            Importer
+          </Button>
+        </>
+      }
       hint={
         <>
           Plusieurs règles par tag sont possibles (ex. un <code>hi</code> et un{" "}
-          <code>hihi</code>). Le message est généré si laissé vide.
+          <code>hihi</code>). Le message est généré si laissé vide. Import CSV/Excel —
+          colonnes : <code>tag, opérateur, seuil, sévérité, message</code> (opérateur/seuil
+          vides = alarme booléenne <code>== 1</code>).
         </>
       }
     >

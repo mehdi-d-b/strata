@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Bell, Trash2 } from "lucide-react";
 import { deleteTag, fetchTags, saveTag, type Tag } from "./api";
 import { PageHeader } from "@/components/PageHeader";
 import { Section } from "@/components/Section";
+import { TagAlarmDialog } from "@/components/TagAlarmDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -18,6 +19,7 @@ import {
 export function TagsView() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [savingName, setSavingName] = useState<string | null>(null);
+  const [alarmTag, setAlarmTag] = useState<string | null>(null);
 
   const load = () => fetchTags().then(setTags).catch(() => setTags([]));
   useEffect(() => {
@@ -127,6 +129,14 @@ export function TagsView() {
                     <Button
                       size="icon-sm"
                       variant="ghost"
+                      title="Alarmes du tag"
+                      onClick={() => setAlarmTag(t.name)}
+                    >
+                      <Bell />
+                    </Button>
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
                       className="text-destructive hover:text-destructive"
                       title="Supprimer la config"
                       onClick={() => onDelete(t.name)}
@@ -148,6 +158,10 @@ export function TagsView() {
           </TableBody>
         </Table>
       </Section>
+
+      {alarmTag && (
+        <TagAlarmDialog tag={alarmTag} onClose={() => setAlarmTag(null)} />
+      )}
     </>
   );
 }
