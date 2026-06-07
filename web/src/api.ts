@@ -326,3 +326,52 @@ export const updateDashboard = (id: string, name: string, spec: DashboardSpec) =
   });
 export const deleteDashboard = (id: string) =>
   api(`/api/dashboards/${encodeURIComponent(id)}`, { method: "DELETE" });
+
+// ─── Alarmes (Phase A : seuils calculés par Strata) ────────────────────────
+
+export type Severity = "critical" | "warning" | "info";
+export const ALARM_OPERATORS = [">", ">=", "<", "<=", "==", "!="] as const;
+export type AlarmOperator = (typeof ALARM_OPERATORS)[number];
+
+export type AlarmRule = {
+  id: string;
+  tag: string;
+  operator: AlarmOperator;
+  threshold: number;
+  severity: Severity;
+  message: string | null;
+  for_ms?: number;
+  hysteresis?: number;
+  enabled: boolean;
+};
+
+export type Alarm = {
+  id: string;
+  rule_id: string | null;
+  source: "rule" | "tag";
+  tag: string;
+  severity: Severity;
+  message: string;
+  value: number | null;
+  state: "active" | "cleared";
+  raised_at: string;
+  cleared_at: string | null;
+  acked: boolean;
+  acked_by: string | null;
+  acked_at: string | null;
+};
+
+export const fetchAlarmRules = () => api<AlarmRule[]>("/api/alarm-rules");
+export const saveAlarmRule = (rule: Omit<AlarmRule, "id"> & { id?: string }) =>
+  rule.id
+    ? api<AlarmRule>(`/api/alarm-rules/${encodeURIComponent(rule.id)}`, {
+        method: "PUT",
+        body: JSON.stringify(rule),
+      })
+    : api<AlarmRule>("/api/alarm-rules", { method: "POST", body: JSON.stringify(rule) });
+export const deleteAlarmRule = (id: string) =>
+  api(`/api/alarm-rules/${encodeURIComponent(id)}`, { method: "DELETE" });
+
+export const fetchAlarms = () => api<Alarm[]>("/api/alarms");
+export const ackAlarm = (id: string) =>
+  api<Alarm>(`/api/alarms/${encodeURIComponent(id)}/ack`, { method: "POST" });

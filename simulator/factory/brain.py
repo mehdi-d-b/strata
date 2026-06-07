@@ -268,7 +268,23 @@ class Brewery:
             prefix = f"{self.site}.{r.name}"
             for v in r.vessels:
                 s.update(v.tags(prefix))
+                # Tag d'alarme BOOLÉEN dérivé (façon tag d'alarme PLC / Type B) :
+                # 1 quand la cuve s'écarte fortement de sa cible. Corrélé aux
+                # incidents du scénario (surchauffe, coup de chaud…), pas aléatoire.
+                drift = abs(v.temperature - v.target_temp)
+                running = v.state == State.RUNNING
+                s[f"{prefix}.{v.name}.defaut_thermique"] = (
+                    1.0 if running and drift > 2 * v.tolerance else 0.0
+                )
+                # Bit de panne de la cuve (état FAULT).
+                s[f"{prefix}.{v.name}.panne"] = 1.0 if v.state == State.FAULT else 0.0
             s.update(r.bottler.tags(prefix))
+            s[f"{prefix}.{r.bottler.name}.panne"] = (
+                1.0 if r.bottler.state == State.FAULT else 0.0
+            )
             # Qualité de ligne, pratique pour un widget de synthèse.
-            s[f"{prefix}.qualite_ligne"] = round(r.upstream_quality * 100, 1)
+            q = round(r.upstream_quality * 100, 1)
+            s[f"{prefix}.qualite_ligne"] = q
+            # Warning qualité basse (event booléen de ligne).
+            s[f"{prefix}.qualite_basse"] = 1.0 if q < 80 else 0.0
         return s

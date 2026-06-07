@@ -121,6 +121,7 @@ function AccountSection() {
 
 function DisplaySection() {
   const [win, setWin] = useState(loadPrefs().defaultWindowSec);
+  const [alarmToasts, setAlarmToasts] = useState(loadPrefs().alarmToasts);
   const { density, setDensity } = useDensity();
 
   const save = () => {
@@ -131,6 +132,17 @@ function DisplaySection() {
   return (
     <Section title="Préférences d'affichage" hint="Stocké dans ce navigateur uniquement.">
       <div className="flex flex-col gap-3">
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={alarmToasts}
+            onChange={(e) => {
+              setAlarmToasts(e.target.checked);
+              savePrefs({ alarmToasts: e.target.checked });
+            }}
+          />
+          Afficher les notifications d'alarme (toasts en bas à droite)
+        </label>
         <Field label="Densité d'affichage">
           <select
             value={density}
