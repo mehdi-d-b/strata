@@ -100,8 +100,11 @@ Architecture **cerveau / faces** conçue pour accueillir les vraies faces en P6 
 - [x] Persistance : relancer Strata recharge tout depuis la base
 
 ## Phase 9 — Plus si affinité
-- [ ] RisingWave : streams dérivés temps réel, alarmes
-- [ ] SCADA / synoptiques, alarming
+- [ ] RisingWave : streams dérivés temps réel — **évolution de la détection d'alarmes à
+      l'échelle** (aujourd'hui les seuils sont évalués dans la gateway ; le modèle `alarms` est
+      déjà conçu indépendant du détecteur, `source: rule|tag`, pour basculer vers RisingWave
+      **sans toucher l'UI**). Aussi : alarmes dérivées multi-tags, fenêtres glissantes.
+- [ ] SCADA / synoptiques (vues schématiques animées par les tags)
 - [ ] OEE complet (dispo × perf × qualité)
 - [ ] **Prévision de séries — TimesFM** (Google). Service Python séparé : lit l'historique
       (`/api/history` ou Timescale en lecture), réinjecte les prévisions comme tags
@@ -116,6 +119,30 @@ Architecture **cerveau / faces** conçue pour accueillir les vraies faces en P6 
       ⚠️ Règle d'or : l'IA passe TOUJOURS par l'API, jamais d'accès direct à la base (sinon on
       perd auth/RBAC/audit).
 
+## Phase 10 — Front : refonte UX/UI, visualisation & alarmes ⬅️ *fait* (chat front dédié)
+Mené dans un chat dédié au front (`web/`, parfois `gateway/`). Mergé dans `main`.
+- [x] **Design system** : tokens sémantiques **clair + sombre** (source unique), toggle de thème,
+      **sidebar** à sections + repli, kit de composants partagés (PageHeader / Section / TabBar /
+      KpiCard + primitives shadcn Button/Input/Card/Table/Badge + toaster Sonner). **8 vues
+      migrées** ; `style.css` élagué (plus de couleur en dur).
+- [x] **Explorer** (ex « Temps réel ») : tooltip multi-séries (report LOCF), **2 échelles
+      indépendantes** gauche/droite (forçage manuel + défaut par unité), contrôles (pause, zoom
+      boîte X/Y avec auto-pause, reset, export CSV, masquer une série), **mode historique daté**
+      (endpoint `/api/history?from&to` + down-sampling `time_bucket`, validé).
+- [x] **Dashboards** (privés par utilisateur) : panneaux multi-séries **sauvegardés**, données
+      **REST + auto-refresh**, plage de temps partagée (relative/absolue), éditeur de panneaux.
+      Table `dashboards` + CRUD gateway (validé).
+- [x] **Alarmes A + B** : détection de **seuils dans la gateway** (`alarm_rules` / `alarms`,
+      anti-rebond `for_ms`, hystérésis, 1 active/règle), **polling REST**, **badge** + **toasts**
+      (réglables, action *Acquitter*) + **bandeau critique**, page **Alarmes** (onglets
+      courantes/règles, résumé par sévérité, filtres, ack / tout-acquitter). **Type B** (tags PLC
+      alarme) = règle `== 1` via **fiche-tag** + **import CSV/Excel** (SheetJS). ⚠️ **une seule
+      source de vérité `alarm_rules`, pas de flag `is_alarm`**.
+- [x] **Finitions** : palette de commandes **⌘K**, toggle de **densité**, préférences locales.
+- [ ] *Reste front (Phase C alarmes, plus tard)* : **historique d'alarmes daté**
+      (`/api/alarms/history`), **push WS instantané** (dépend de la sécurisation du `/ws`),
+      indicateurs d'alarme **en contexte** (Explorer/Dashboards), son optionnel.
+
 ## Dette technique & durcissement « prod »
 Choix assumés de la phase démo : rien de bloquant en local, mais à traiter avant un vrai
 déploiement. Aucune ne presse pour une démo.
@@ -127,12 +154,15 @@ déploiement. Aucune ne presse pour une démo.
   compression). Onglet Paramètres ajoute aussi : changer son mot de passe, préférences
   d'affichage, infos système (versions, inventaire, état connecteurs).
 
-### 🟠 WebSocket temps réel non authentifié
+### 🔼 WebSocket temps réel non authentifié *(priorité remontée)*
 - `/ws` (gateway) est **ouvert** : le flux live contourne l'auth ET le RBAC (un opérateur
   limité à une ligne voit tout le temps réel). Cause : le WS se connecte direct sur `:3001`,
   hors du chemin cookie des `fetch`.
 - À faire : valider la session à l'ouverture du WS + **filtrer** les tags poussés selon les
   droits de lecture de l'utilisateur (le filtrage est une feature en soi).
+- **Bloque aussi le push temps réel des alarmes** (Phase C) : aujourd'hui les alarmes passent
+  par **polling REST** (~7 s) précisément pour ne pas dépendre de ce point. Le sécuriser
+  débloque le push WS instantané des alarmes ET le RBAC du live. → bon prochain chantier.
 
 ### ✅ Secrets hors du compose — *fait*
 - Credentials Timescale + `ADMIN_PASSWORD` via `.env` (gitignored) ; `.env.example` documenté.
