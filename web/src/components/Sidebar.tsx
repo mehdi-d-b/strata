@@ -1,6 +1,7 @@
-import { useCallback, useState, type ComponentType } from "react";
+import { useCallback, useState, type ComponentType, type ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 import {
+  Bell,
   Cpu,
   Factory,
   LayoutDashboard,
@@ -16,6 +17,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/auth";
 import { userIsAdmin } from "@/api";
+import { useAlarms } from "@/alarms";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/theme";
@@ -37,6 +39,7 @@ const NAV: NavGroup[] = [
       { to: "/", label: "Accueil", icon: LayoutDashboard, end: true },
       { to: "/explorer", label: "Explorer", icon: LineChart },
       { to: "/dashboards", label: "Dashboards", icon: LayoutGrid },
+      { to: "/alarms", label: "Alarmes", icon: Bell },
       { to: "/production", label: "Production", icon: Factory },
     ],
   },
@@ -62,6 +65,20 @@ const STORAGE_KEY = "strata-sidebar-collapsed";
 export function Sidebar({ onSearch }: { onSearch: () => void }) {
   const { user, logout } = useAuth();
   const admin = userIsAdmin(user);
+  const { counts, unacked } = useAlarms();
+
+  // Badge de comptage sur l'entrée Alarmes (rouge si critique, sinon ambre).
+  const alarmBadge: ReactNode =
+    unacked > 0 ? (
+      <span
+        className={cn(
+          "ml-auto rounded-full px-1.5 text-[10px] font-semibold text-white",
+          counts.critical > 0 ? "bg-bad" : "bg-warn",
+        )}
+      >
+        {unacked}
+      </span>
+    ) : null;
 
   const [collapsed, setCollapsed] = useState(
     () => typeof window !== "undefined" && localStorage.getItem(STORAGE_KEY) === "1",
@@ -129,7 +146,12 @@ export function Sidebar({ onSearch }: { onSearch: () => void }) {
                 </div>
               )}
               {items.map((it) => (
-                <SidebarLink key={it.to} item={it} collapsed={collapsed} />
+                <SidebarLink
+                  key={it.to}
+                  item={it}
+                  collapsed={collapsed}
+                  badge={it.to === "/alarms" ? alarmBadge : undefined}
+                />
               ))}
             </div>
           );
@@ -184,7 +206,15 @@ export function Sidebar({ onSearch }: { onSearch: () => void }) {
   );
 }
 
-function SidebarLink({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
+function SidebarLink({
+  item,
+  collapsed,
+  badge,
+}: {
+  item: NavItem;
+  collapsed: boolean;
+  badge?: ReactNode;
+}) {
   const Icon = item.icon;
   return (
     <NavLink
@@ -203,6 +233,7 @@ function SidebarLink({ item, collapsed }: { item: NavItem; collapsed: boolean })
     >
       <Icon className="size-4 shrink-0" />
       {!collapsed && <span className="truncate">{item.label}</span>}
+      {!collapsed && badge}
     </NavLink>
   );
 }
