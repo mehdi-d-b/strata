@@ -1020,6 +1020,34 @@ async function seedAdmin() {
   }
 }
 
+/**
+ * Seed de règles d'alarme de démo (idempotent : seulement si la table est vide).
+ * Calées sur les tags du simulateur brasserie pour que des alarmes se déclenchent
+ * au fil des incidents du scénario. Désactivable via SEED_DEMO_ALARMS=0.
+ */
+async function seedDemoAlarms() {
+  if (process.env.SEED_DEMO_ALARMS === "0") return;
+  const { rows } = await pool.query("SELECT count(*)::int AS n FROM alarm_rules");
+  if (rows[0].n > 0) return;
+  const demo = [
+    // Seuils analogiques (Type A).
+    { tag: "brasserie.ipa.fermenteur.temperature", operator: ">", threshold: 24, severity: "warning", message: "Fermentation IPA trop chaude", hysteresis: 1 },
+    { tag: "brasserie.blonde.empateur.temperature", operator: ">", threshold: 70, severity: "critical", message: "Empâtage blonde en surchauffe (enzymes)", hysteresis: 2 },
+    // Tags d'alarme booléens du simulateur (préfigure le Type B), condition == 1.
+    { tag: "brasserie.ipa.fermenteur.defaut_thermique", operator: "==", threshold: 1, severity: "warning", message: "Défaut thermique fermenteur IPA", hysteresis: 0 },
+    { tag: "brasserie.blonde.embouteilleuse.panne", operator: "==", threshold: 1, severity: "critical", message: "Panne embouteilleuse blonde", hysteresis: 0 },
+    { tag: "brasserie.blonde.qualite_basse", operator: "==", threshold: 1, severity: "info", message: "Qualité ligne blonde dégradée", hysteresis: 0 },
+  ];
+  for (const r of demo) {
+    await pool.query(
+      `INSERT INTO alarm_rules (id, tag, operator, threshold, severity, message, hysteresis)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [randomUUID(), r.tag, r.operator, r.threshold, r.severity, r.message, r.hysteresis],
+    );
+  }
+  app.log.info(`[alarms] ${demo.length} règles de démo créées (SEED_DEMO_ALARMS=0 pour désactiver)`);
+}
+
 // --- Démarrage -------------------------------------------------------------
 async function main() {
   await seedAdmin();
@@ -1028,6 +1056,7 @@ async function main() {
 
   // Moteur d'alarmes : charge les règles, resynchronise l'état actif, puis
   // rafraîchit les règles périodiquement (les modifs via l'UI sont prises en compte).
+  await seedDemoAlarms();
   await alarmEngine.refresh();
   await alarmEngine.hydrate();
   setInterval(() => alarmEngine.refresh().catch(() => {}), 10_000);
