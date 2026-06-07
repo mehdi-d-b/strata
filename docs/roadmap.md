@@ -80,7 +80,8 @@ Architecture **cerveau / faces** conçue pour accueillir les vraies faces en P6 
 - [x] Routes existantes protégées (écriture tag = droit sur le tag ; réglages globaux = admin)
 - [x] Journal d'audit (login, créations, écritures…)
 - [x] Front : login, gate de l'appli, page Admin (users, rôles/droits, audit)
-- [ ] *Reporté* : sécuriser le WebSocket temps réel (lecture non authentifiée pour l'instant)
+- [x] Sécurisation du WebSocket `/ws` : auth au handshake (cookie same-origin) + filtrage du
+      flux par droits `read` (un opérateur ne reçoit que ses lignes en temps réel)
 - [ ] *Reporté* : masquer/désactiver les boutons selon les droits (passe shadcn)
 
 ## Phase 8 — Écriture vers les PLC (sink) ✍️ ⬅️ *fait*
@@ -154,15 +155,12 @@ déploiement. Aucune ne presse pour une démo.
   compression). Onglet Paramètres ajoute aussi : changer son mot de passe, préférences
   d'affichage, infos système (versions, inventaire, état connecteurs).
 
-### 🔼 WebSocket temps réel non authentifié *(priorité remontée)*
-- `/ws` (gateway) est **ouvert** : le flux live contourne l'auth ET le RBAC (un opérateur
-  limité à une ligne voit tout le temps réel). Cause : le WS se connecte direct sur `:3001`,
-  hors du chemin cookie des `fetch`.
-- À faire : valider la session à l'ouverture du WS + **filtrer** les tags poussés selon les
-  droits de lecture de l'utilisateur (le filtrage est une feature en soi).
-- **Bloque aussi le push temps réel des alarmes** (Phase C) : aujourd'hui les alarmes passent
-  par **polling REST** (~7 s) précisément pour ne pas dépendre de ce point. Le sécuriser
-  débloque le push WS instantané des alarmes ET le RBAC du live. → bon prochain chantier.
+### ✅ WebSocket temps réel sécurisé — *fait*
+- `/ws` : auth au handshake via cookie same-origin (close 4401 sinon) + **filtrage RBAC** par
+  socket (chaque client ne reçoit que les tags qu'il a le droit de lire). Front en same-origin
+  (proxy Vite `/ws`). Testé : admin = tout, opérateur restreint = ses lignes seulement.
+- Débloque le **push temps réel des alarmes** (Phase C) sur le même socket filtré (aujourd'hui
+  encore en polling REST ~7 s, qui reste le fallback).
 
 ### ✅ Secrets hors du compose — *fait*
 - Credentials Timescale + `ADMIN_PASSWORD` via `.env` (gitignored) ; `.env.example` documenté.
