@@ -3,9 +3,9 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
 
-// Le front parle à la gateway. En dev, on proxifie /api (HTTP) vers elle pour
-// éviter les soucis de CORS. Le WebSocket, lui, se connecte directement à la
-// gateway (port 3001) côté client — le proxy WS de Vite est peu fiable.
+// Le front parle à la gateway. En dev, on proxifie /api (HTTP) et /ws (WebSocket)
+// vers elle : ainsi tout est same-origin, le cookie de session part sur le
+// handshake WS et la gateway peut authentifier + filtrer le flux par droits.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -17,6 +17,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": { target: "http://localhost:3001", changeOrigin: true },
+      "/ws": { target: "ws://localhost:3001", ws: true },
     },
   },
 });

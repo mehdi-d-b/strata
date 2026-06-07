@@ -120,8 +120,8 @@ async function ensureTagExists(name: string) {
 const app = Fastify({ logger: true });
 await app.register(websocket);
 
-/** Connexions WS actives. */
-const clients = new Set<import("ws").WebSocket>();
+/** Connexions WS actives, chacune liée à son utilisateur (pour le filtrage RBAC). */
+const clients = new Map<import("ws").WebSocket, AuthUser>();
 
 app.get("/health", async () => ({ status: "ok" }));
 
@@ -946,8 +946,16 @@ app.get("/api/audit", { preHandler: requireAdmin }, async (req) => {
 });
 
 app.register(async (f) => {
-  f.get("/ws", { websocket: true }, (socket) => {
-    clients.add(socket);
+  f.get("/ws", { websocket: true }, async (socket, req) => {
+    // Auth au handshake : on lit la session depuis le cookie (same-origin -> il
+    // part tout seul). Pas de session valide -> on ferme proprement (4401).
+    const sid = readSessionCookie(req);
+    const user = sid ? await loadUserFromSession(pool, sid).catch(() => null) : null;
+    if (!user) {
+      socket.close(4401, "non authentifié");
+      return;
+    }
+    clients.set(socket, user);
     socket.on("close", () => clients.delete(socket));
   });
 });
@@ -982,10 +990,11 @@ async function startConsumer() {
       alarmEngine.onMeasure(m.tag, value).catch((e) =>
         app.log.error(`alarme: ${(e as Error).message}`),
       );
-      // On pousse la valeur SCALÉE au navigateur (cohérent avec l'historique).
+      // On pousse la valeur SCALÉE au navigateur (cohérent avec l'historique),
+      // mais SEULEMENT aux clients qui ont le droit de LIRE ce tag (filtrage RBAC).
       const out = JSON.stringify({ ...m, value });
-      for (const ws of clients) {
-        if (ws.readyState === 1) ws.send(out); // 1 = OPEN
+      for (const [ws, user] of clients) {
+        if (ws.readyState === 1 && can(user, "read", m.tag)) ws.send(out); // 1 = OPEN
       }
     },
   });

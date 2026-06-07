@@ -45,8 +45,11 @@ export function useRealtimeBuffers(opts: RealtimeOptions) {
   // --- WebSocket : remplit les buffers, ne rend rien ----------------------
   useEffect(() => {
     const proto = location.protocol === "https:" ? "wss" : "ws";
+    // Same-origin (`location.host`) : le cookie de session part avec le handshake
+    // -> la gateway authentifie + filtre par droits. En dev, le proxy Vite route
+    // /ws vers la gateway. Override possible via VITE_WS_URL.
     const url =
-      import.meta.env.VITE_WS_URL ?? `${proto}://${location.hostname}:3001/ws`;
+      import.meta.env.VITE_WS_URL ?? `${proto}://${location.host}/ws`;
     const ws = new WebSocket(url);
     ws.onopen = () => opts.onLive?.(true);
     ws.onclose = () => opts.onLive?.(false);
