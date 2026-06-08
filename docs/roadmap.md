@@ -178,3 +178,20 @@ rétention sans toucher au SQL »).
 - Observabilité : Redpanda Console (P0) + Grafana plus tard
 - Packaging : Compose (P0) ; installeur natif par OS = polish très tardif, non prioritaire
 - CI légère quand le code grossit
+
+### Déploiement / prod (todos infra issus des questions du 2026-06-08)
+- [ ] **Front en prod** : service `web` qui sert le `vite build` (statique) via **nginx ou
+      Caddy**, + **reverse proxy** `/api` & `/ws` → gateway (rend le same-origin propre en prod).
+      Aujourd'hui le front tourne en `npm run dev` (Vite), c'est du dev uniquement.
+- [ ] **Lanceur non-tech** : `start.sh` / `start.bat` (compose up + bons profils + ouvre le
+      navigateur). Évolution possible : petite app de **supervision HORS Docker** (start/stop,
+      choix des profils, voyants d'état des containers via le socket Docker) — l'avantage d'être
+      « en amont » = elle voit l'état des containers même si l'appli est down.
+- [ ] **Enrichir `/api/system`** : état des services vus par la gateway (Redpanda/Timescale/
+      RisingWave joignables ?, profils actifs). Limite assumée : la gateway ne voit que de
+      l'intérieur ; le monitoring infra « vrai » reste externe (Console, Grafana).
+
+### Assistant IA (cf. docs/llm-integration.md)
+- [ ] **Serveur MCP « Strata »** wrappant l'API gateway (compte de service RBAC, lecture seule
+      d'abord) + LLM local (Ollama/vLLM) ou API. Copilote de questions → analyste d'anomalies
+      (via RisingWave) → action encadrée. **RAG = optionnel/ultérieur** (docs métier seulement).
