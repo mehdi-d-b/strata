@@ -84,6 +84,7 @@ services:
       - >-
         rpk topic create tags.raw --brokers redpanda:9092 -p 1 -r 1 || true;
         rpk topic create tags.cmd --brokers redpanda:9092 -p 1 -r 1 || true;
+        rpk topic create tags.derived --brokers redpanda:9092 -p 1 -r 1 || true;
         rpk topic create _connect-configs --brokers redpanda:9092 -p 1 -r 1 -c cleanup.policy=compact || true;
         rpk topic create _connect-offsets --brokers redpanda:9092 -p 1 -r 1 -c cleanup.policy=compact || true;
         rpk topic create _connect-status --brokers redpanda:9092 -p 1 -r 1 -c cleanup.policy=compact || true
@@ -209,6 +210,31 @@ services:
       - "3001:3001"
     restart: unless-stopped
 
+  # --- RisingWave : moteur de calcul temps réel (profil optionnel `risingwave`) ---
+  # Base de données de streaming (Rust, sans JVM). Consomme tags.raw, calcule des
+  # vues matérialisées (anomalies, dérivés) et sink les résultats vers Redpanda.
+  # Démarre uniquement avec : docker compose --profile risingwave up -d
+  risingwave:
+    image: risingwavelabs/risingwave:v2.1.0
+    container_name: strata-risingwave
+    profiles: ["risingwave"]
+    command: single_node
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    ports:
+      - "4566:4566"   # endpoint SQL (wire PostgreSQL)
+    volumes:
+      - risingwave-data:/root/.risingwave
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'printf > /dev/tcp/127.0.0.1/4566'"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
 volumes:
   redpanda-data:
   timescale-data:
+  risingwave-data:
