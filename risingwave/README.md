@@ -40,14 +40,28 @@ docker compose exec -T timescaledb psql -h risingwave -p 4566 -d dev -U root -c 
 docker compose exec redpanda rpk topic consume tags.derived --num 5 --brokers redpanda:9092
 ```
 
-## Reste à faire (après que l'image tourne)
-- [ ] Valider la chaîne source -> MV -> sink (étapes 3-5 ci-dessus).
-- [ ] Affiner la détection : passer du proxy "dispersion" à un vrai **z-score par
-      point** (JOIN du flux courant avec `mv_tag_stats`).
-- [ ] **Gateway** : consumer `tags.derived` -> insert dans `alarms` (source='derived',
-      severity selon l'écart). C'est le raccord qui fait apparaître les anomalies
-      dans la page Alarmes existante, sans toucher l'UI.
-- [ ] Mettre à jour la roadmap (P9 RisingWave) une fois validé.
+## État : chaîne complète FAITE ✅
+- [x] Chaîne source -> MV -> sink validée.
+- [x] **Gateway** : consumer `tags.derived` -> `alarms` (source='derived', anti-doublon).
+      Les anomalies apparaissent dans la page Alarmes existante, sans toucher l'UI.
+
+## Idées d'amélioration (pour un prochain chat — non faites, par choix)
+- **Vrai z-score par point** : aujourd'hui `mv_anomalies` utilise un *proxy de dispersion*
+  (`sd > 0.25*|mean|`) par fenêtre. Mieux : JOIN du flux courant `s_tags_raw` avec
+  `mv_tag_stats` pour calculer `|value - mean| / sd` point par point, anomalie si > ~3σ.
+  Plus juste et standard. (Attention : les tags PLC4X `RANDOM` ressortiront toujours, c'est
+  normal — ce sont de vraies valeurs aléatoires.)
+- **Sévérité graduée** : warning au-delà de 3σ, critical au-delà de 5σ (au lieu de warning fixe
+  dans le consumer gateway `startDerivedConsumer`).
+- **Clear auto des anomalies derived** : actuellement une anomalie derived se lève mais n'est
+  jamais clôturée automatiquement (contrairement aux seuils de l'AlarmEngine). Émettre aussi un
+  signal de "retour normal" depuis RisingWave (ou clôturer après N fenêtres sans anomalie).
+- **Exclure les tags non pertinents** : filtrer les tags booléens (`.panne`, `.state`,
+  `defaut_thermique`) de la détection d'anomalie statistique — ils ont déjà des règles de seuil
+  dédiées ; le z-score n'a pas de sens dessus.
+- **Autres MV utiles** : moyennes mobiles lissées, débits cumulés, OEE live — réémises comme
+  tags `source='derived'`, affichables dans l'Explorer à côté du réel.
+- Mettre à jour `docs/roadmap.md` (P9 RisingWave) au prochain jalon.
 
 ## Fichiers
 - `risingwave/01-setup.sql` : source `tags.raw` -> `mv_tag_stats` (TUMBLE 1 min) ->
