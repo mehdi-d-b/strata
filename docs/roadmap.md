@@ -49,7 +49,6 @@ couches. Chaque phase est démontrable seule.
       (indépendante du protocole ; `source` en métadonnée). MQTT + PLC4X alignés.
 - [x] 3 templates connecteurs commentés (Siemens/Schneider/Rockwell), prêts pour le réel
 - [ ] OPC-UA : bridge source (`gopcua`) → `tags.raw` (+ serveur OPC-UA dans le simulateur)
-- [ ] libplctag : option no-JVM pour Allen-Bradley en direct
 - [ ] Sink PLC4X : écriture de consignes dans les tags (le `Plc4xSinkConnector` est déjà dispo)
 
 ## Phase 5 — Simulateur d'usine (cerveau riche, faces simples) ⬅️ *fait* 🍺
