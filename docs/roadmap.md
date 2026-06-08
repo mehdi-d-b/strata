@@ -3,7 +3,7 @@
 Principe : **une chaîne qui marche de bout en bout le plus tôt possible**, puis on enrichit par
 couches. Chaque phase est démontrable seule.
 
-## Phase 0 — Fondations (le terrain) ⬅️ *en cours*
+## Phase 0 — Fondations (le terrain) ⬅️ *fait*
 **But : `make up` lance un socle vide mais sain.**
 - [x] Structure monorepo (`infra/`, `connectors/`, `gateway/`, `web/`, `simulator/`, `docs/`)
 - [x] `docker-compose.yml` : Redpanda + Redpanda Console + TimescaleDB, avec healthchecks
