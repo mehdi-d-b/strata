@@ -1002,6 +1002,49 @@ async function startConsumer() {
 }
 
 /**
+ * Consumer du topic `tags.derived` : les anomalies calculées par RisingWave
+ * (MV -> sink) deviennent des alarmes `source='derived'` dans le modèle existant.
+ * Anti-doublon : au plus une anomalie 'derived' active par tag à la fois.
+ */
+async function startDerivedConsumer() {
+  const consumer = kafka.consumer({ groupId: "strata-gateway-derived" });
+  consumer.on(consumer.events.CRASH, (e) => {
+    app.log.error(`consumer derived crash: ${e.payload.error.message} — relance dans 3s`);
+    setTimeout(() => startDerivedConsumer().catch(() => {}), 3000);
+  });
+  await consumer.connect();
+  await consumer.subscribe({ topic: "tags.derived", fromBeginning: false });
+  await consumer.run({
+    eachMessage: async ({ message }) => {
+      const payload = message.value?.toString();
+      if (!payload) return;
+      let a: { tag?: string; mean?: number; sd?: number; detected_at?: string };
+      try {
+        a = JSON.parse(payload);
+      } catch {
+        return;
+      }
+      if (!a.tag) return;
+      // Insère une anomalie active si aucune n'est déjà ouverte pour ce tag.
+      await pool.query(
+        `INSERT INTO alarms (id, source, tag, severity, message, value, state, raised_at)
+         SELECT $1, 'derived', $2, 'warning', $3, $4, 'active', now()
+         WHERE NOT EXISTS (
+           SELECT 1 FROM alarms WHERE tag = $2 AND source = 'derived' AND state = 'active'
+         )`,
+        [
+          randomUUID(),
+          a.tag,
+          `Anomalie détectée (RisingWave) sur ${a.tag}`,
+          a.mean ?? null,
+        ],
+      ).catch((e) => app.log.error(`alarme derived: ${(e as Error).message}`));
+    },
+  });
+  app.log.info("consumer Redpanda démarré sur tags.derived (anomalies)");
+}
+
+/**
  * Crée un compte admin initial s'il n'existe aucun utilisateur. Le mot de passe
  * vient de ADMIN_PASSWORD (défaut: "admin", à changer au 1er login en prod).
  */
@@ -1079,6 +1122,11 @@ async function main() {
       await new Promise((r) => setTimeout(r, 3000));
     }
   }
+  // Consumer des anomalies RisingWave (topic tags.derived). Best-effort : si le
+  // topic/profil risingwave n'est pas là, il retentera tout seul sans bloquer.
+  startDerivedConsumer().catch((e) =>
+    app.log.warn(`consumer derived indispo: ${(e as Error).message}`),
+  );
 }
 
 main();

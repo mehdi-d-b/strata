@@ -25,7 +25,7 @@ CREATE INDEX IF NOT EXISTS idx_alarm_rules_tag ON alarm_rules(tag) WHERE enabled
 CREATE TABLE IF NOT EXISTS alarms (
     id         TEXT PRIMARY KEY,
     rule_id    TEXT REFERENCES alarm_rules(id) ON DELETE SET NULL,
-    source     TEXT NOT NULL DEFAULT 'rule' CHECK (source IN ('rule', 'tag')),
+    source     TEXT NOT NULL DEFAULT 'rule' CHECK (source IN ('rule', 'tag', 'derived')),
     tag        TEXT NOT NULL,
     severity   TEXT NOT NULL,
     message    TEXT NOT NULL,
