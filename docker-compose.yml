@@ -215,7 +215,7 @@ services:
   # vues matérialisées (anomalies, dérivés) et sink les résultats vers Redpanda.
   # Démarre uniquement avec : docker compose --profile risingwave up -d
   risingwave:
-    image: risingwavelabs/risingwave:v2.1.0
+    image: risingwavelabs/risingwave:latest
     container_name: strata-risingwave
     profiles: ["risingwave"]
     command: single_node
