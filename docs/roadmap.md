@@ -183,10 +183,12 @@ rétention sans toucher au SQL »).
 - [ ] **Front en prod** : service `web` qui sert le `vite build` (statique) via **nginx ou
       Caddy**, + **reverse proxy** `/api` & `/ws` → gateway (rend le same-origin propre en prod).
       Aujourd'hui le front tourne en `npm run dev` (Vite), c'est du dev uniquement.
-- [ ] **Lanceur non-tech** : `start.sh` / `start.bat` (compose up + bons profils + ouvre le
-      navigateur). Évolution possible : petite app de **supervision HORS Docker** (start/stop,
-      choix des profils, voyants d'état des containers via le socket Docker) — l'avantage d'être
-      « en amont » = elle voit l'état des containers même si l'appli est down.
+- [ ] **Launcher / superviseur desktop** (cf. **docs/launcher-plan.md**) : app **hors Docker**
+      en **Tauri** (réutilise React/shadcn, binaire léger, backend Rust pour piloter Docker).
+      v1 : vérif prérequis Docker, cases à cocher des profils → compose up, voyants d'état des
+      containers, start/stop/logs, ouvre le navigateur. v2 : backup/restore volumes, hôte distant.
+      ⚠️ Frontière actée : **web = données métier (in-band) ; launcher = cycle de vie infra
+      (out-of-band)**. Ex : backup de volume = launcher, pas le site web.
 - [ ] **Enrichir `/api/system`** : état des services vus par la gateway (Redpanda/Timescale/
       RisingWave joignables ?, profils actifs). Limite assumée : la gateway ne voit que de
       l'intérieur ; le monitoring infra « vrai » reste externe (Console, Grafana).
