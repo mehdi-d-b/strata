@@ -12,7 +12,7 @@ const CONNECT_URL = process.env.KAFKA_CONNECT_URL ?? "http://kafka-connect:8083"
 
 export type Device = {
   name: string;
-  protocol: "modbus-tcp" | "s7" | "eip" | "simulated";
+  protocol: "modbus-tcp" | "s7" | "eip" | "opcua" | "simulated";
   host: string;
   options: string | null;
   poll_ms: number;
@@ -27,7 +27,9 @@ export type DeviceTag = {
 
 /** connectionString PLC4X pour un device. */
 function connectionString(d: Device): string {
-  const scheme = d.protocol === "modbus-tcp" ? "modbus-tcp" : d.protocol;
+  // OPC-UA : le transport fait partie du schéma PLC4X → `opcua:tcp://host:port`
+  // (host = endpoint OPC-UA de l'automate, ex S7-1500 natif sur :4840).
+  const scheme = d.protocol === "opcua" ? "opcua:tcp" : d.protocol;
   const base = `${scheme}://${d.host}`;
   return d.options ? `${base}?${d.options}` : base;
 }
