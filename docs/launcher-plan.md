@@ -170,3 +170,74 @@ et orienter*, pas *réparer*.
   nginx/Caddy *sert* l'appli. Complémentaires.
 - **`/api/system`** (in-band) : montre ce que la gateway voit de l'intérieur ; le launcher
   montre ce que Docker voit de l'extérieur. Les deux, pas l'un contre l'autre.
+
+## 9. Distribution : du repo cloné au « .exe + images »
+
+**Question clé** : faut-il cloner tout le repo pour lancer Strata, ou un simple `.exe` de
+launcher suffit-il ? Cible visée : **le .exe seul** (l'utilisateur ne télécharge que ça).
+
+### Pourquoi aujourd'hui le repo est nécessaire
+Le `docker-compose.yml` actuel dépend du repo de deux façons :
+1. **Services construits depuis les sources** (`build:`) → il faut le code : `gateway`,
+   `simulator`, `kafka-connect` (profil plc4x), et bientôt `web` en prod.
+2. **Fichiers de config montés** (bind mounts) → il faut ces fichiers : init SQL
+   (`infra/timescale/init`), `infra/mosquitto/mosquitto.conf`, les 3 `connectors/*.yaml`.
+
+Tout le reste (redpanda, console, timescale, mosquitto, redpanda-connect, risingwave) est
+déjà des **images publiques pures**.
+
+### Le bon modèle mental
+> Ce qu'on **livre** n'est pas le *code source*, ce sont des **images** (le code déjà
+> compilé) + un **compose** + la **config**. Le source ne sert qu'à *fabriquer* les images.
+
+Une fois les images publiées sur un **registry** (Docker Hub, GHCR…), la machine cliente
+n'a plus besoin des sources : elle **pull** les images.
+
+### Deux modèles (les deux = .exe-only)
+- **Modèle A — tout en images, le .exe ne porte QUE le compose** *(le plus pur)* : on publie
+  `strata-gateway`/`strata-simulator`/`strata-web`… ; on **cuit la config statique dans les
+  images** (init SQL `COPY`é dans une image timescale custom, conf mosquitto, YAML connecteurs) ;
+  le **compose de prod** ne contient que des `image:` + volumes + env (petit fichier). Le
+  launcher **embarque ce compose** (ressource Tauri), l'écrit, `docker compose up` → pull.
+- **Modèle B — le launcher embarque un petit « runtime »** *(pragmatique)* : images
+  pré-construites pour le code, **mais** la config reste des fichiers que le launcher **bundle**
+  (compose + `infra/` + `connectors/`) et extrait dans un dossier applicatif au 1er lancement.
+  Config éditable, gérée par le launcher ; sources jamais nécessaires.
+
+**Reco** : Modèle A pour la config statique (init SQL, mosquitto, connecteurs) + garder **un
+seul fichier externe, le `.env`**, généré par le launcher (cf. §10).
+
+### Ce que ça demande
+1. **Registry + CI** qui build & push les images custom à chaque version (`strata-gateway:1.0`…).
+2. **`docker-compose.prod.yml`** avec des `image:` (sans `build:` ni bind mounts) ; le dev garde
+   le compose actuel avec `build:` → pattern **dev compose / prod compose**.
+3. **`.env`** = seule chose propre à chaque install → la « config guidée » du launcher (§10).
+   Le compose est déjà prêt (`${VAR:-défaut}`), un `.env` écrit par le launcher suffit.
+4. Le launcher **embarque le compose de prod** + génère le `.env` + `up`.
+
+### Variante usine sans internet (air-gapped)
+Pas de pull possible → livrer les images en **tarballs** (`docker save`/`load`). Le launcher
+peut charger un pack d'images local. Même modèle, source d'images différente.
+
+## 10. Éditeur de config dans le launcher : oui, mais lequel ?
+
+Un **éditeur de `.env` dans le launcher = au bon endroit** : le `.env` (mots de passe
+Timescale, `ADMIN_PASSWORD` initial) est nécessaire **pour démarrer** le stack → il vit *quand
+l'appli est down* → **out-of-band**. C'est la « première config guidée » (v2). À présenter en
+**formulaire de clés connues** (champs mot de passe…), pas un éditeur de texte brut — moins de
+pièges, comme le principe « pas de SQL arbitraire » de l'onglet Stockage.
+
+**Mais « un GUI sur la config » dépend de QUELLE config** — la frontière in/out-of-band tranche :
+
+| Config | Où | Pourquoi |
+|---|---|---|
+| `.env` (secrets, identifiants DB, admin initial) | **launcher** | gate le démarrage, secret, app down |
+| profils, machine cible, ports | **launcher** | cycle de vie infra |
+| **tags, automates, dashboards, alarmes, users, rétention** | **app web (déjà fait)** | stocké en base, **RBAC + audit**, « données sur l'usine » |
+
+⚠️ **Piège à documenter dans l'UI** : certaines valeurs du `.env` n'agissent **qu'au premier
+boot**. `ADMIN_PASSWORD` ne *seed* le compte admin qu'une fois (ensuite : changement de mot de
+passe **dans l'app**, in-band). Changer `TIMESCALE_PASSWORD` après l'init du volume casse la
+connexion tant que la base n'est pas mise à jour. L'éditeur doit donc **avertir** : « ces
+réglages s'appliquent surtout à la première installation ». Le launcher pose le *bootstrap* ;
+la gestion courante des comptes reste **dans l'app web**.
