@@ -8,7 +8,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use serde::Serialize;
-use std::path::Path;
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -314,6 +316,97 @@ async fn restore_volume(
     Ok(format!("Volume {volume} restauré depuis {name}."))
 }
 
+// ── Éditeur de .env (config de bootstrap, out-of-band) ──────────────────────
+// Le .env vit AVANT le démarrage du stack → c'est bien le rôle du launcher. La
+// gestion courante des comptes reste dans l'app web (in-band, RBAC).
+
+#[derive(Serialize)]
+struct EnvData {
+    exists: bool,
+    example_exists: bool,
+    values: HashMap<String, String>,
+}
+
+fn env_path(project_dir: &str) -> PathBuf {
+    Path::new(project_dir).join(".env")
+}
+
+fn example_path(project_dir: &str) -> PathBuf {
+    Path::new(project_dir).join(".env.example")
+}
+
+fn parse_env(content: &str) -> HashMap<String, String> {
+    let mut m = HashMap::new();
+    for line in content.lines() {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = t.split_once('=') {
+            m.insert(k.trim().to_string(), v.trim().to_string());
+        }
+    }
+    m
+}
+
+/// Lit le `.env` (ou, à défaut, `.env.example` comme valeurs de départ).
+#[tauri::command]
+async fn read_env(project_dir: String) -> Result<EnvData, String> {
+    let p = env_path(&project_dir);
+    let ex = example_path(&project_dir);
+    let exists = p.exists();
+    let example_exists = ex.exists();
+    let values = if exists {
+        parse_env(&fs::read_to_string(&p).map_err(|e| e.to_string())?)
+    } else if example_exists {
+        parse_env(&fs::read_to_string(&ex).map_err(|e| e.to_string())?)
+    } else {
+        HashMap::new()
+    };
+    Ok(EnvData { exists, example_exists, values })
+}
+
+/// Écrit le `.env` en PRÉSERVANT commentaires et autres clés : on remplace la
+/// valeur des clés fournies, on ajoute celles qui manquent. Modèle de base : le
+/// `.env` existant, sinon `.env.example`, sinon vide.
+#[tauri::command]
+async fn write_env(project_dir: String, values: HashMap<String, String>) -> Result<String, String> {
+    let p = env_path(&project_dir);
+    let ex = example_path(&project_dir);
+    let base = if p.exists() {
+        fs::read_to_string(&p).map_err(|e| e.to_string())?
+    } else if ex.exists() {
+        fs::read_to_string(&ex).map_err(|e| e.to_string())?
+    } else {
+        String::new()
+    };
+
+    let mut lines: Vec<String> = base.lines().map(|l| l.to_string()).collect();
+    let mut remaining = values.clone();
+
+    for line in lines.iter_mut() {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with('#') {
+            continue;
+        }
+        if let Some((k, _)) = t.split_once('=') {
+            let key = k.trim().to_string();
+            if let Some(val) = remaining.remove(&key) {
+                *line = format!("{key}={val}");
+            }
+        }
+    }
+    for (k, v) in remaining {
+        lines.push(format!("{k}={v}"));
+    }
+    let mut out = lines.join("\n");
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    fs::write(&p, out).map_err(|e| e.to_string())?;
+    Ok(format!("Configuration enregistrée dans {}.", p.to_string_lossy()))
+}
+
 /// Ouvre une URL dans le navigateur par défaut. Sous Linux/WSL, `xdg-open` n'est
 /// pas toujours là : on tente plusieurs ouvreurs (dont `wslview`).
 #[cfg(target_os = "linux")]
@@ -373,6 +466,8 @@ fn main() {
             list_volumes,
             backup_volume,
             restore_volume,
+            read_env,
+            write_env,
             open_app
         ])
         .run(tauri::generate_context!())

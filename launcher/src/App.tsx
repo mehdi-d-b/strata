@@ -11,8 +11,10 @@ import {
   listContexts,
   listVolumes,
   openApp,
+  readEnv,
   restoreVolume,
   updateImages,
+  writeEnv,
   type DockerStatus,
   type Health,
   type ServiceStatus,
@@ -29,7 +31,15 @@ const HEALTH_DOT: Record<Health, string> = {
   unknown: "#6b7280",
 };
 
-type Tab = "pilotage" | "maintenance";
+type Tab = "pilotage" | "maintenance" | "config";
+
+// Clés du .env éditables (config de bootstrap, out-of-band — cf. launcher-plan §10).
+const ENV_KEYS: { key: string; label: string; secret: boolean; placeholder: string; note?: string }[] = [
+  { key: "ADMIN_PASSWORD", label: "Mot de passe administrateur (initial)", secret: true, placeholder: "admin", note: "Ne s'applique qu'au PREMIER démarrage. Ensuite, changez-le dans l'application." },
+  { key: "TIMESCALE_USER", label: "Utilisateur de la base de données", secret: false, placeholder: "strata" },
+  { key: "TIMESCALE_PASSWORD", label: "Mot de passe de la base de données", secret: true, placeholder: "strata", note: "Le modifier après le 1er démarrage casse la connexion à la base existante." },
+  { key: "TIMESCALE_DB", label: "Nom de la base de données", secret: false, placeholder: "strata" },
+];
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("pilotage");
@@ -51,6 +61,11 @@ export default function App() {
   const [backupDir, setBackupDir] = useState(() => localStorage.getItem("strata.backupDir") || "");
   const [restoreVol, setRestoreVol] = useState("");
   const [restoreArchive, setRestoreArchive] = useState("");
+
+  // Config (.env)
+  const [envExists, setEnvExists] = useState<boolean | null>(null);
+  const [envValues, setEnvValues] = useState<Record<string, string>>({});
+  const [showSecrets, setShowSecrets] = useState(false);
 
   const setContext = (v: string) => {
     setContextState(v);
@@ -114,6 +129,24 @@ export default function App() {
     return () => clearInterval(t);
   }, [follow, loadLogs]);
 
+  const loadEnv = useCallback(async () => {
+    if (!projectDir) return;
+    try {
+      const d = await readEnv(projectDir);
+      setEnvExists(d.exists);
+      const v: Record<string, string> = {};
+      for (const k of ENV_KEYS) v[k.key] = d.values[k.key] ?? "";
+      setEnvValues(v);
+    } catch (e) {
+      setLog(String(e));
+    }
+  }, [projectDir]);
+
+  // Charge le .env à l'ouverture de l'onglet Configuration.
+  useEffect(() => {
+    if (tab === "config") loadEnv();
+  }, [tab, loadEnv]);
+
   // Sélecteur natif (dossier ou fichier). r est string|string[]|null.
   const browse = async (
     setter: (v: string) => void,
@@ -156,6 +189,7 @@ export default function App() {
       <nav className="tabs">
         <button className={tab === "pilotage" ? "tab on" : "tab"} onClick={() => setTab("pilotage")}>Pilotage</button>
         <button className={tab === "maintenance" ? "tab on" : "tab"} onClick={() => setTab("maintenance")}>Maintenance</button>
+        <button className={tab === "config" ? "tab on" : "tab"} onClick={() => setTab("config")}>Configuration</button>
       </nav>
 
       {/* Prérequis + contexte : visibles partout */}
@@ -329,6 +363,44 @@ export default function App() {
             </div>
           </section>
         </>
+      )}
+
+      {tab === "config" && (
+        <section className="card">
+          <h2>Configuration (fichier .env)</h2>
+          {!projectDir && <p className="warn">Indiquez d'abord le dossier du projet (onglet Pilotage).</p>}
+          {projectDir && envExists === false && (
+            <p className="muted">Aucun fichier <code>.env</code> pour l'instant — il sera créé à l'enregistrement (à partir de <code>.env.example</code> si présent).</p>
+          )}
+          <p className="muted">Réglages de <strong>première installation</strong>. La gestion courante des comptes se fait ensuite dans l'application.</p>
+
+          {ENV_KEYS.map((k) => (
+            <label key={k.key} className="field">
+              <span>{k.label}</span>
+              <input
+                type={k.secret && !showSecrets ? "password" : "text"}
+                value={envValues[k.key] ?? ""}
+                onChange={(e) => setEnvValues((s) => ({ ...s, [k.key]: e.target.value }))}
+                placeholder={`défaut : ${k.placeholder}`}
+                spellCheck={false}
+                disabled={!projectDir}
+              />
+              {k.note && <span className="muted small">⚠️ {k.note}</span>}
+            </label>
+          ))}
+
+          <label className="profile">
+            <input type="checkbox" checked={showSecrets} onChange={(e) => setShowSecrets(e.target.checked)} /> <span>Afficher les mots de passe</span>
+          </label>
+
+          <div className="actions">
+            <button disabled={!projectDir || !!busy} onClick={() => run("Enregistrement de la configuration…", async () => { const m = await writeEnv(projectDir, envValues); await loadEnv(); return m; })}>
+              {busy === "Enregistrement de la configuration…" ? "⏳ Enregistrement…" : "💾 Enregistrer"}
+            </button>
+            <button className="ghost" disabled={!projectDir || !!busy} onClick={loadEnv}>⟳ Recharger</button>
+          </div>
+          {busy === "Enregistrement de la configuration…" && <div className="banner"><span className="spinner" /> {busy}</div>}
+        </section>
       )}
 
       {log && <pre className="log">{log}</pre>}

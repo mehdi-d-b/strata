@@ -59,4 +59,16 @@ export const backupVolume = (ctx: string, volume: string, destDir: string) =>
 export const restoreVolume = (ctx: string, volume: string, archivePath: string) =>
   invoke<string>("restore_volume", { context: c(ctx), volume, archivePath });
 
+export type EnvData = {
+  exists: boolean;
+  example_exists: boolean;
+  values: Record<string, string>;
+};
+
+export const readEnv = (projectDir: string) =>
+  invoke<EnvData>("read_env", { projectDir });
+
+export const writeEnv = (projectDir: string, values: Record<string, string>) =>
+  invoke<string>("write_env", { projectDir, values });
+
 export const openApp = (url: string) => invoke<void>("open_app", { url });

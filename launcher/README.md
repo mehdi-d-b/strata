@@ -55,11 +55,14 @@ Toutes prennent un `context` optionnel (nom de contexte Docker = **hôte distant
 | `restore_volume(volume, archive)` | vide puis ré-extrait (stack arrêté de préférence) |
 | `open_app(url)` | ouvre le navigateur (front de prod ; `5173` = dev only) |
 
-## UI : deux onglets
+## UI : trois onglets
 - **Pilotage** : prérequis Docker, hôte (contexte), dossier projet, profils, start/stop/
   refresh/ouvrir, table de santé des services.
 - **Maintenance** : logs (filtre par service + suivi), mise à jour des images,
   sauvegarde/restauration des volumes.
+- **Configuration** : éditeur du `.env` (mots de passe admin/base) en formulaire de clés
+  connues, avec avertissements (valeurs « premier boot seulement »). Commandes
+  `read_env` / `write_env` (préservent commentaires et autres clés).
 
 ## État
 **v1 + v2 (fonctionnels)** : détection Docker, profils, start/stop, santé, ouverture appli,
