@@ -36,14 +36,26 @@ entre « projet de dev lancé au terminal » et « produit qu'on installe ».
 | Réutiliser le front React/shadcn | ✅ (webview = on fait du React) | ✅ | ❌ (autre UI) |
 
 **Choix : Tauri.** Raisons :
-- On **réutilise l'écosystème front** (React/Vite/shadcn, le design system existant) pour
-  l'UI du launcher — pas de nouvelle stack UI à apprendre.
+- On **réutilise le savoir-faire front** (React/Vite/shadcn) pour l'UI du launcher — pas de
+  nouvelle stack UI à apprendre. ⚠️ Nuance : le launcher est une **app distincte**, il
+  **n'embarque pas l'app web en cours** et ne partage pas ses tokens de design (qui vivent dans
+  `web/`, source unique — cf. Phase 10). Il aura donc **son propre style** (esprit shadcn pour
+  rester cohérent, mais pas l'identité visuelle de l'app, sauf à extraire un jour les tokens dans
+  un package partagé). En v1 : style propre et léger.
 - Binaire **minuscule** (webview système, pas de Chromium) → cohérent avec la ligne
   « léger, sans JVM » de Strata.
 - Backend **Rust** pour parler à Docker / au système : peu de code (lancer des commandes,
   lire des statuts), et cohérent avec l'écosystème (Redpanda, RisingWave sont en Rust).
 
 Seul coût : écrire le petit backend Rust (commandes Docker + statuts). Modeste.
+
+**Build & cible OS.** `tauri build` produit **un bundle par OS** (`.msi`/`.exe` Windows,
+`.dmg`/`.app` macOS, `.deb`/`.AppImage` Linux). À l'exécution, l'OS est **connu** (Rust
+`std::env::consts::OS` / `cfg!(target_os)`) — donc « sur quel OS tourne-t-on » n'est **jamais**
+la difficulté. La difficulté est **où se trouve le démon Docker** *dans* cet OS (voir §6). Note
+de cross-build : on peut développer/valider en bundle **Linux** depuis WSL ; produire le `.exe`
+**Windows** (la cible cliente réelle) demande un build sur/pour Windows (cross-compilation Tauri
+pénible) — étape de packaging ultérieure, pas un prérequis pour coder la logique.
 
 ## 3. Architecture (out-of-band)
 
@@ -100,9 +112,11 @@ tout garder dans le web. Non — appliquer la règle ci-dessus au cas par cas.
 - [ ] Détection des prérequis : Docker installé ? démarré ? (message clair sinon)
 - [ ] Écran de lancement : cases à cocher des **profils** (plc4x, risingwave) → génère le
       bon `docker compose --profile … up -d`
-- [ ] Voyants d'état des containers (vert/rouge), via `docker ps` / events
+- [ ] Voyants d'état des containers à **3 états** (down / **starting** / healthy), basés sur le
+      **healthcheck** Docker (pas seulement `docker ps` : *running* ≠ *ready*, cf. §6)
 - [ ] Boutons Start / Stop / Logs
-- [ ] Ouvre le navigateur sur l'appli (http://localhost:5173 ou le front de prod)
+- [ ] Ouvre le navigateur sur **le front de prod** (nginx/Caddy, cf. roadmap). En mode dev
+      uniquement, l'URL Vite `http://localhost:5173` ; en produit livré ce port **n'existe pas**
 
 **v2 (confort / produit) :**
 - [ ] Backup / restore des volumes (timescale-data, redpanda-data, risingwave-data)
@@ -110,7 +124,38 @@ tout garder dans le web. Non — appliquer la règle ci-dessus au cas par cas.
 - [ ] Mise à jour des images (pull + recreate)
 - [ ] Première config guidée (mot de passe admin, .env)
 
-## 6. Quand le faire / priorité
+## 6. Pièges d'implémentation (cadrage technique avant de coder)
+
+Le plan ci-dessus minimise 4 difficultés réelles. Le risque d'ingénierie n'est **pas l'UI**,
+il est dans ces points :
+
+1. **Détecter le démon Docker, de façon portable** — *le vrai point dur*. L'OS est connu (§2),
+   mais **où parler à Docker** varie : socket Unix (`/var/run/docker.sock`) sous Linux, **named
+   pipe** (`//./pipe/docker_engine`) sous Windows, Docker Desktop **dans WSL2**, ou un **hôte
+   distant** (Docker context). **Principe directeur** : on **auto-détecte le cas courant** (socket
+   par défaut de l'OS), et **tout ce qui n'est pas détectable de façon fiable → on demande à
+   l'utilisateur** (champ « hôte / contexte Docker », avec valeur par défaut + bouton « tester la
+   connexion »). Pas de magie fragile : auto si possible, **fallback explicite** sinon.
+
+2. **« Running » ≠ « Ready ».** `docker ps` dit *up*, pas *healthy* — un container peut tourner
+   sans accepter de connexions (Timescale au boot). Le compose a déjà des **healthchecks** (P0) :
+   les voyants doivent refléter l'**état de santé** (down / starting / healthy), pas la simple
+   présence. Lire `docker inspect`/`compose ps` pour le `Health`.
+
+3. **Réutilisation front = savoir-faire, pas l'app.** Le launcher est une **app distincte**
+   (cf. §2) → **style propre**. Ne pas promettre l'identité visuelle de l'app web sans extraire
+   les tokens (`web/`) dans un package partagé — sinon duplication.
+
+4. **URL d'ouverture = front de prod, pas le port dev.** `5173` est Vite (dev) ; en produit livré
+   il n'existe pas. Le launcher ouvre le **front de prod** (nginx/Caddy). Garder le port dev
+   *seulement* en mode développement.
+
+**Launcher = orchestrateur, PAS installeur.** Il **détecte** et **guide** (« Docker n'est pas
+installé/démarré → voici comment faire »), mais il **n'installe pas Docker** lui-même (poser
+Docker Desktop par-dessus est fragile et hors périmètre). « Vérifier les prérequis » = *diagnostiquer
+et orienter*, pas *réparer*.
+
+## 7. Quand le faire / priorité
 
 - **Pas prioritaire** : le stack fonctionne ; c'est du confort de déploiement/packaging.
 - **Déclencheur** : quand Strata doit être **installé par un non-tech** ou **livré comme
@@ -119,7 +164,7 @@ tout garder dans le web. Non — appliquer la règle ci-dessus au cas par cas.
 - **Indépendant du reste** : nouveau composant, ne touche ni la gateway ni le web existant.
   Peut être fait dans un repo/dossier séparé (`launcher/`) ou un chat dédié.
 
-## 7. Lien avec le reste
+## 8. Lien avec le reste
 
 - **Front de prod** (roadmap, Déploiement) : le launcher *ouvre* l'appli ; le service
   nginx/Caddy *sert* l'appli. Complémentaires.
