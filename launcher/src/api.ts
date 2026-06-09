@@ -21,21 +21,42 @@ export type ServiceStatus = {
 };
 
 export const PROFILES = [
-  { id: "plc4x", label: "PLC4X", hint: "automates S7 / Modbus / EtherNet-IP (1 container JVM)" },
-  { id: "risingwave", label: "RisingWave", hint: "anomalies temps réel (SQL streaming)" },
+  { id: "plc4x", label: "Automates industriels", hint: "connexion aux automates (Siemens, Schneider, Allen-Bradley…)" },
+  { id: "risingwave", label: "Détection d'anomalies", hint: "analyse des mesures en temps réel" },
 ] as const;
 
-export const detectDocker = () => invoke<DockerStatus>("detect_docker");
+// `ctx` : nom de contexte Docker (hôte distant). null/"" = contexte courant.
+const c = (ctx: string) => (ctx ? ctx : null);
+
+export const detectDocker = (ctx: string) =>
+  invoke<DockerStatus>("detect_docker", { context: c(ctx) });
+
+export const listContexts = () => invoke<string[]>("list_contexts");
 
 export const defaultProjectDir = () => invoke<string>("default_project_dir");
 
-export const composePs = (projectDir: string) =>
-  invoke<ServiceStatus[]>("compose_ps", { projectDir });
+export const composePs = (ctx: string, projectDir: string) =>
+  invoke<ServiceStatus[]>("compose_ps", { context: c(ctx), projectDir });
 
-export const composeUp = (projectDir: string, profiles: string[]) =>
-  invoke<string>("compose_up", { projectDir, profiles });
+export const composeUp = (ctx: string, projectDir: string, profiles: string[]) =>
+  invoke<string>("compose_up", { context: c(ctx), projectDir, profiles });
 
-export const composeDown = (projectDir: string, profiles: string[]) =>
-  invoke<string>("compose_down", { projectDir, profiles });
+export const composeDown = (ctx: string, projectDir: string, profiles: string[]) =>
+  invoke<string>("compose_down", { context: c(ctx), projectDir, profiles });
+
+export const composeLogs = (ctx: string, projectDir: string, service: string, tail: number) =>
+  invoke<string>("compose_logs", { context: c(ctx), projectDir, service: service || null, tail });
+
+export const updateImages = (ctx: string, projectDir: string, profiles: string[]) =>
+  invoke<string>("update_images", { context: c(ctx), projectDir, profiles });
+
+export const listVolumes = (ctx: string, projectDir: string) =>
+  invoke<string[]>("list_volumes", { context: c(ctx), projectDir });
+
+export const backupVolume = (ctx: string, volume: string, destDir: string) =>
+  invoke<string>("backup_volume", { context: c(ctx), volume, destDir });
+
+export const restoreVolume = (ctx: string, volume: string, archivePath: string) =>
+  invoke<string>("restore_volume", { context: c(ctx), volume, archivePath });
 
 export const openApp = (url: string) => invoke<void>("open_app", { url });

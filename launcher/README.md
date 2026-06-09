@@ -38,16 +38,31 @@ npm run tauri build   # .deb/.AppImage (Linux), .dmg (macOS), .msi/.exe (Windows
 > sur/pour Windows (cross-compilation Tauri pénible). Depuis WSL on valide en Linux.
 
 ## Commandes backend (Rust → front)
+Toutes prennent un `context` optionnel (nom de contexte Docker = **hôte distant**).
+
 | Commande | Rôle |
 |---|---|
 | `detect_docker` | client installé ? démon joignable ? version + contexte |
+| `list_contexts` | contextes Docker disponibles (hôtes) |
 | `default_project_dir` | `STRATA_DIR` ou cwd |
 | `compose_ps` | services + **santé** (healthy/starting/unhealthy/running/down) |
 | `compose_up(profiles)` | `docker compose --profile … up -d` |
-| `compose_down` | `docker compose down` |
+| `compose_down(profiles)` | down de **tous** les profils + `--remove-orphans` (stop complet) |
+| `compose_logs(service, tail)` | snapshot de logs (le front boucle pour « suivre ») |
+| `update_images(profiles)` | `pull` puis recrée le stack (`up -d`) |
+| `list_volumes` | volumes Docker du projet |
+| `backup_volume(volume, dest)` | tar.gz du volume via un container alpine éphémère |
+| `restore_volume(volume, archive)` | vide puis ré-extrait (stack arrêté de préférence) |
 | `open_app(url)` | ouvre le navigateur (front de prod ; `5173` = dev only) |
 
-## État : v1 (MVP) — non packagé
-Fait : détection Docker, profils, start/stop, voyants de santé, ouverture appli.
-Reste (v2, cf. plan) : backup/restore volumes, hôte distant, update d'images,
-première config guidée, streaming des logs, vraies icônes.
+## UI : deux onglets
+- **Pilotage** : prérequis Docker, hôte (contexte), dossier projet, profils, start/stop/
+  refresh/ouvrir, table de santé des services.
+- **Maintenance** : logs (filtre par service + suivi), mise à jour des images,
+  sauvegarde/restauration des volumes.
+
+## État
+**v1 + v2 (fonctionnels)** : détection Docker, profils, start/stop, santé, ouverture appli,
+**logs**, **hôte distant** (contexte), **update d'images**, **backup/restore volumes**.
+Reste (polish/produit) : packaging en exécutable (`tauri build` + vraies icônes),
+première config guidée (`.env` / mot de passe admin), logs en vrai streaming.
