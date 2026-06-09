@@ -17,9 +17,38 @@ interface web moderne. Sans JVM (sauf le module PLC4X optionnel), packagé en **
 (topo global), [CLAUDE.md](CLAUDE.md), [docs/roadmap.md](docs/roadmap.md),
 [docs/adr/0001-choix-stack.md](docs/adr/0001-choix-stack.md) (pourquoi ces choix).
 
-## Démarrage rapide
+## 🚀 Le plus simple : le launcher (sans terminal)
 
-Prérequis : Docker + Docker Compose.
+Pas envie de toucher au terminal ? Le **launcher** est une petite application de bureau qui
+démarre/arrête Strata à votre place : il **vérifie que Docker est prêt**, vous **cochez les
+options** (PLC4X, RisingWave), vous cliquez **Démarrer**, et il **ouvre l'appli web**. Il gère
+aussi les logs, la mise à jour des images et la sauvegarde des données (onglet *Maintenance*).
+
+**Prérequis unique** : installer puis lancer **[Docker Desktop](https://www.docker.com/products/docker-desktop/)**
+(Windows/Mac/Linux). C'est tout — le launcher détecte le reste et vous guide si quelque chose manque.
+
+> ℹ️ À terme, le launcher sera un **exécutable à double-cliquer** (`.exe` / `.dmg` / `.AppImage`,
+> via `npm run tauri build`). En attendant, on le lance une fois depuis ses sources :
+
+```bash
+cd launcher
+npm install
+npm run tauri dev        # ouvre la fenêtre du launcher
+```
+
+Dans la fenêtre :
+1. **Prérequis** : les 2 voyants Docker doivent être verts.
+2. **Projet Strata** : indiquez le dossier de ce dépôt (pré-rempli si vous lancez avec
+   `STRATA_DIR=/chemin/vers/strata npm run tauri dev`).
+3. *(optionnel)* cochez **PLC4X** et/ou **RisingWave**.
+4. Cliquez **▶ Démarrer** et attendez que les services passent en **healthy**.
+5. Cliquez **↗ Ouvrir l'appli** (lancez aussi le front : voir [Interface web](#interface-web-dev)).
+
+Guide complet du launcher : [launcher/README.md](launcher/README.md).
+
+## Démarrage en ligne de commande
+
+Pour les habitués du terminal. Prérequis : Docker + Docker Compose.
 
 ```bash
 cp .env.example .env     # ajuster les mots de passe avant tout déploiement
@@ -80,6 +109,7 @@ gateway/      API REST + WebSocket (Node/TS) — cœur applicatif
 simulator/    usine simulée (micro-brasserie, Python)
 risingwave/   SQL setup RisingWave (profil optionnel)
 web/          frontend React + Vite + TS
+launcher/     superviseur desktop Tauri (lance le stack sans terminal)
 docs/         architecture, roadmap, ADR
 ```
 
