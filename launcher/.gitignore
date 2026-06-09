@@ -1,0 +1,10 @@
+# deps & build
+node_modules/
+dist/
+# rust / tauri
+src-tauri/target/
+src-tauri/gen/
+# icons générés (régénérables via scripts/gen-icons.mjs)
+src-tauri/icons/*.png
+# os
+.DS_Store
