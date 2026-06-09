@@ -204,7 +204,7 @@ export const sendCommand = (tag: string, value: number) =>
 
 // ─── Automates (devices) & adresses (gestion des tags) ─────────────────────
 
-export const PROTOCOLS = ["modbus-tcp", "s7", "eip", "simulated"] as const;
+export const PROTOCOLS = ["modbus-tcp", "s7", "eip", "opcua", "simulated"] as const;
 export type Protocol = (typeof PROTOCOLS)[number];
 
 export type Device = {

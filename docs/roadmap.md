@@ -48,7 +48,14 @@ couches. Chaque phase est démontrable seule.
 - [x] **Convention de nommage métier** `site.ligne.machine.mesure` coulée dans le béton
       (indépendante du protocole ; `source` en métadonnée). MQTT + PLC4X alignés.
 - [x] 3 templates connecteurs commentés (Siemens/Schneider/Rockwell), prêts pour le réel
-- [ ] OPC-UA : bridge source (`gopcua`) → `tags.raw` (+ serveur OPC-UA dans le simulateur)
+- [x] OPC-UA **via PLC4X** (driver client `plc4j-driver-opcua`) : OPC-UA = une valeur de
+      `protocol` de plus (`opcua`), connection string `opcua:tcp://host:port`, adresse = node-id
+      (`ns=2;s=…`). Réutilise **toute** l'infra PLC4X (Kafka Connect + génération de connecteurs +
+      Déployer/Retirer). Le serveur OPC-UA est **intégré à l'automate** (S7-1500 natif) → PLC4X est
+      le **client**, pas de serveur tiers. ⚠️ Passe donc par le **profil `plc4x` (JVM)** — écart
+      assumé au « OPC-UA sans JVM » initial, au profit d'un réemploi total. *Câblé ; non validé
+      end-to-end (pas de serveur OPC-UA de test). Alternative no-JVM `gopcua` = juste une autre
+      source vers `tags.raw`, ajoutable plus tard.*
 - [ ] Sink PLC4X : écriture de consignes dans les tags (le `Plc4xSinkConnector` est déjà dispo)
 
 ## Phase 5 — Simulateur d'usine (cerveau riche, faces simples) ⬅️ *fait* 🍺
