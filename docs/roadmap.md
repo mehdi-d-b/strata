@@ -182,12 +182,26 @@ rétention sans toucher au SQL »).
 - [ ] **Front en prod** : service `web` qui sert le `vite build` (statique) via **nginx ou
       Caddy**, + **reverse proxy** `/api` & `/ws` → gateway (rend le same-origin propre en prod).
       Aujourd'hui le front tourne en `npm run dev` (Vite), c'est du dev uniquement.
-- [ ] **Launcher / superviseur desktop** (cf. **docs/launcher-plan.md**) : app **hors Docker**
-      en **Tauri** (réutilise React/shadcn, binaire léger, backend Rust pour piloter Docker).
-      v1 : vérif prérequis Docker, cases à cocher des profils → compose up, voyants d'état des
-      containers, start/stop/logs, ouvre le navigateur. v2 : backup/restore volumes, hôte distant.
+- [x] **Launcher / superviseur desktop** (cf. **docs/launcher-plan.md**) : app **hors Docker**
+      en **Tauri** (backend Rust qui shelle le CLI `docker`). **Fait** (branche `feat/launcher-v2`,
+      pas encore mergée ; backup/restore + éditeur .env non testés à l'exécution) :
+      - v1 : prérequis Docker, cases des profils → compose up, voyants de **santé** (running≠ready),
+        start/stop/refresh, ouvre l'appli.
+      - v2 : **logs** (filtre + suivi), **hôte distant** (contexte Docker), **update d'images**,
+        **backup/restore des volumes**, **sélecteurs de fichiers natifs**, **onglet Configuration**
+        (éditeur `.env` = config de bootstrap), textes dé-jargonnés.
       ⚠️ Frontière actée : **web = données métier (in-band) ; launcher = cycle de vie infra
       (out-of-band)**. Ex : backup de volume = launcher, pas le site web.
+      - [ ] *Reste* : **packaging** en exécutable double-cliquable (`tauri build` + vraies icônes) ;
+        câbler l'URL « Ouvrir l'appli » sur le front de prod (pas le port Vite `5173`).
+- [ ] **Distribution « .exe + images » (productisation)** — *prérequis pour livrer sans cloner le
+      repo* (cf. **docs/launcher-plan.md §9**). Aujourd'hui lancer Strata exige le repo (services
+      `build:` + fichiers de config montés). Cible : **publier les images** sur un registry
+      (gateway/simulator/web/kafka-connect) + un **`docker-compose.prod.yml`** en `image:`
+      (config cuite dans les images ou bundlée par le launcher) → le launcher n'embarque que le
+      compose et **pull** tout. Demande : registry + CI de build/push, compose de prod, `.env`
+      généré (déjà fait dans le launcher). Variante usine **air-gapped** : images en tarballs
+      (`docker save`/`load`).
 - [ ] **Enrichir `/api/system`** : état des services vus par la gateway (Redpanda/Timescale/
       RisingWave joignables ?, profils actifs). Limite assumée : la gateway ne voit que de
       l'intérieur ; le monitoring infra « vrai » reste externe (Console, Grafana).
