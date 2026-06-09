@@ -58,6 +58,36 @@ Points clés :
   `/api/production`, `/api/alarms`, et `/api/command` pour les actions). C'est tout
   l'intérêt des contrats stables qu'on a bâtis.
 
+### 2.1 Où vit le LLM ? (déploiement & launcher)
+
+Deux scénarios de déploiement, et la frontière **in-band / out-of-band** (cf.
+[launcher-plan.md](launcher-plan.md)) les tranche proprement :
+
+- **LLM local** (Ollama/vLLM — usine sans cloud) = **un container** → un **profil
+  Docker** dédié (`--profile ai`), au même titre que `plc4x` ou `risingwave`. Le
+  **serveur MCP** est un autre petit container sous ce même profil.
+- **LLM cloud** (API Claude) = **aucun container**, juste une **clé/config** côté
+  gateway/MCP → rien à lancer.
+
+**Conséquence : le launcher est déjà prêt.** Comme il gère les profils de façon
+générique, ajouter l'assistant = **une entrée** dans sa liste de profils
+(`{ id: "ai", … }`) → une case à cocher apparaît, avec start/stop/santé gratuits.
+Aucun câblage en dur (payoff du design générique des profils).
+
+Répartition des responsabilités (la même règle que pour le reste du launcher) :
+
+| Côté **launcher** (cycle de vie infra, out-of-band) | Côté **app / gateway** (données métier, in-band) |
+|---|---|
+| démarrer/arrêter le service LLM + serveur MCP (profil `ai`) | quel modèle utiliser, prompts, configuration RAG |
+| **présence des poids** du modèle (`ollama pull …`, comme une image/un volume) | **compte RBAC** de l'agent + audit |
+| voyant de santé du container LLM | périmètre de tags autorisé à l'assistant |
+
+Sur **figer un seul modèle vs en proposer plusieurs** : avec MCP, les *tools* sont
+**agnostiques au modèle** (n'importe quel client MCP les appelle) → le **choix du
+modèle peut rester configurable** sans tout figer. Ce qui est réellement lié à un
+modèle donné, c'est l'**embedding du RAG** (changer d'embeddings ⇒ réindexer les
+docs) — à garder en tête si/quand on fait du RAG (§3).
+
 ## 3. MCP vs RAG — ne pas confondre
 
 Ce sont deux briques **orthogonales et complémentaires** :
