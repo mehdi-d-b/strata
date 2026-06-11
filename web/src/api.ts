@@ -375,3 +375,39 @@ export const deleteAlarmRule = (id: string) =>
 export const fetchAlarms = () => api<Alarm[]>("/api/alarms");
 export const ackAlarm = (id: string) =>
   api<Alarm>(`/api/alarms/${encodeURIComponent(id)}/ack`, { method: "POST" });
+
+// ─── OEE (Disponibilité × Performance × Qualité) — pré-calculé en base ─────
+
+export type OeeRow = {
+  line: string;
+  line_label: string | null;
+  day: string;
+  shift_no: number;
+  shift_label: string | null;
+  ok: number | null;
+  produced: number | null;
+  run_minutes: number | null;
+  planned_minutes: number | null;
+  ideal_rate: number;
+  /** Facteurs 0..1, ou null si indéfini (division par 0 / non configuré). */
+  availability: number | null;
+  performance: number | null;
+  quality: number | null;
+  oee: number | null;
+};
+
+export const fetchOee = (days: number) => api<OeeRow[]>(`/api/oee?days=${days}`);
+
+export type OeeLine = {
+  line: string;
+  label: string | null;
+  ideal_rate: number;
+  running_tag: string | null;
+  enabled: boolean;
+};
+
+export const fetchOeeLines = () => api<OeeLine[]>("/api/oee-lines");
+export const saveOeeLine = (l: OeeLine) =>
+  api<OeeLine>("/api/oee-lines", { method: "POST", body: JSON.stringify(l) });
+export const deleteOeeLine = (line: string) =>
+  api(`/api/oee-lines/${encodeURIComponent(line)}`, { method: "DELETE" });

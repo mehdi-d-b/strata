@@ -4,6 +4,7 @@ import {
   Bell,
   Cpu,
   Factory,
+  Gauge,
   LayoutDashboard,
   LayoutGrid,
   LineChart,
@@ -41,6 +42,7 @@ const NAV: NavGroup[] = [
       { to: "/dashboards", label: "Dashboards", icon: LayoutGrid },
       { to: "/alarms", label: "Alarmes", icon: Bell },
       { to: "/production", label: "Production", icon: Factory },
+      { to: "/oee", label: "OEE", icon: Gauge },
     ],
   },
   {
