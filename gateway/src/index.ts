@@ -639,6 +639,60 @@ app.get("/api/production", async (req) => {
   return rows;
 });
 
+// ─── OEE (Disponibilité × Performance × Qualité) — cf. docs/oee-design.md ──
+// Lecture du résultat pré-calculé (vue oee_by_shift). Ouvert comme /api/production.
+app.get("/api/oee", async (req) => {
+  const q = req.query as { days?: string };
+  const days = Number(q.days ?? 7);
+  const { rows } = await pool.query(
+    `SELECT line, line_label, day, shift_no, shift_label,
+            ok, produced, run_minutes, planned_minutes, ideal_rate,
+            availability, performance, quality, oee
+     FROM oee_by_shift
+     WHERE day > (now() - ($1 || ' days')::interval)::date
+     ORDER BY day DESC, line ASC, shift_no ASC`,
+    [days],
+  );
+  return rows;
+});
+
+// Config OEE par ligne (cadence nominale + tag de marche). Réglage global -> admin.
+app.get("/api/oee-lines", { preHandler: requireAdmin }, async () => {
+  const { rows } = await pool.query(
+    "SELECT line, label, ideal_rate, running_tag, enabled FROM oee_line ORDER BY line",
+  );
+  return rows;
+});
+
+app.post("/api/oee-lines", { preHandler: requireAdmin }, async (req, reply) => {
+  const b = req.body as {
+    line?: string;
+    label?: string;
+    ideal_rate?: number;
+    running_tag?: string;
+    enabled?: boolean;
+  };
+  if (!b.line || b.ideal_rate == null)
+    return reply.code(400).send({ error: "line, ideal_rate requis" });
+  await pool.query(
+    `INSERT INTO oee_line (line, label, ideal_rate, running_tag, enabled)
+     VALUES ($1,$2,$3,$4,COALESCE($5,true))
+     ON CONFLICT (line) DO UPDATE SET
+       label=EXCLUDED.label, ideal_rate=EXCLUDED.ideal_rate,
+       running_tag=EXCLUDED.running_tag, enabled=EXCLUDED.enabled`,
+    [b.line, b.label ?? null, b.ideal_rate, b.running_tag ?? null, b.enabled],
+  );
+  await audit(req.user!.username, "oee_line.upsert", b.line);
+  return { ok: true };
+});
+
+app.delete("/api/oee-lines/:line", { preHandler: requireAdmin }, async (req) => {
+  const { line } = req.params as { line: string };
+  await pool.query("DELETE FROM oee_line WHERE line = $1", [line]);
+  await audit(req.user!.username, "oee_line.delete", line);
+  return { ok: true };
+});
+
 // Planning de shifts (toutes versions).
 app.get("/api/shifts", async () => {
   const { rows } = await pool.query(
