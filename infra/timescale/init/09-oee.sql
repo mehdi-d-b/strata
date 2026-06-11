@@ -74,7 +74,9 @@ GROUP BY sa.day, sa.shift_no, sb.tag;
 -- 4. OEE par ligne × shift. A, P, Q (avec gardes anti div/0, plafonnés à 1).
 --    produced = rôle 'produced' si présent, sinon ok+scrap.
 -- ───────────────────────────────────────────────────────────────────────────
-CREATE OR REPLACE VIEW oee_by_shift AS
+-- DROP+CREATE (et non CREATE OR REPLACE) : on change le type des colonnes (float8).
+DROP VIEW IF EXISTS oee_by_shift;
+CREATE VIEW oee_by_shift AS
 WITH counts AS (
     SELECT
         ol.line,
@@ -116,17 +118,22 @@ joined AS (
     ) sd ON true
 ),
 factors AS (
+    -- Cast en float8 : node-postgres sérialise `numeric` en string ; on veut des
+    -- nombres JSON cohérents pour le front (cf. notice docs/oee-design.md §8).
     SELECT
         line, line_label, day, shift_no, shift_label,
-        ok, produced, run_minutes, planned_minutes, ideal_rate,
-        LEAST(1.0, run_minutes / NULLIF(planned_minutes, 0))         AS availability,
-        LEAST(1.0, produced    / NULLIF(run_minutes * ideal_rate, 0)) AS performance,
-        ok::numeric / NULLIF(produced, 0)                            AS quality
+        ok, produced,
+        run_minutes::float8     AS run_minutes,
+        planned_minutes::float8 AS planned_minutes,
+        ideal_rate,
+        LEAST(1.0, run_minutes / NULLIF(planned_minutes, 0))::float8          AS availability,
+        LEAST(1.0, produced    / NULLIF(run_minutes * ideal_rate, 0))::float8 AS performance,
+        (ok::numeric / NULLIF(produced, 0))::float8                           AS quality
     FROM joined
 )
 SELECT
     *,
-    (availability * performance * quality) AS oee
+    (availability * performance * quality)::float8 AS oee
 FROM factors;
 
 -- ───────────────────────────────────────────────────────────────────────────

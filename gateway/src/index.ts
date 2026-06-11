@@ -123,6 +123,24 @@ async function seedDemoRole(name: string) {
   );
 }
 
+/**
+ * Backfill démo : pose les rôles ok/scrap sur les compteurs brasserie DÉJÀ
+ * découverts (l'auto-seed à la découverte ne couvre que les tags nouveaux ; sur un
+ * volume existant les tags sont déjà connus). Non destructif. Désactivable via
+ * SEED_DEMO_ROLES=0.
+ */
+async function seedDemoRoles() {
+  if (process.env.SEED_DEMO_ROLES === "0") return;
+  await pool.query(
+    `INSERT INTO tag_role (tag_name, role)
+     SELECT t.name,
+            CASE WHEN t.name LIKE '%.bouteilles_ok' THEN 'ok' ELSE 'scrap' END
+     FROM tags t
+     WHERE (t.name LIKE '%.bouteilles_ok' OR t.name LIKE '%.bouteilles_rebut')
+       AND NOT EXISTS (SELECT 1 FROM tag_role r WHERE r.tag_name = t.name)`,
+  );
+}
+
 /** Crée une ligne `tags` par défaut pour un tag jamais vu (auto-découverte). */
 async function ensureTagExists(name: string) {
   if (tagCache.has(name)) return;
@@ -1176,6 +1194,7 @@ async function seedDemoAlarms() {
 // --- Démarrage -------------------------------------------------------------
 async function main() {
   await seedAdmin();
+  await seedDemoRoles();
   await refreshTagCache();
   setInterval(() => refreshTagCache().catch(() => {}), 10_000); // garde le cache frais
 
