@@ -105,6 +105,24 @@ function scaled(name: string, raw: number): number {
   return raw * cfg.scale + cfg.offset;
 }
 
+/**
+ * Démo : assigne un rôle de production aux compteurs connus de la brasserie, à la
+ * découverte du tag. Sans ça, Production ET OEE n'ont aucun rôle tant qu'on ne les
+ * pose pas à la main — et l'init SQL ne peut pas (FK vers des tags pas encore créés).
+ * Non destructif : ne touche pas un tag qui a déjà un rôle (respecte la config manuelle).
+ */
+async function seedDemoRole(name: string) {
+  let role: string | null = null;
+  if (name.endsWith(".bouteilles_ok")) role = "ok";
+  else if (name.endsWith(".bouteilles_rebut")) role = "scrap";
+  if (!role) return;
+  await pool.query(
+    `INSERT INTO tag_role (tag_name, role)
+     SELECT $1, $2 WHERE NOT EXISTS (SELECT 1 FROM tag_role WHERE tag_name = $1)`,
+    [name, role],
+  );
+}
+
 /** Crée une ligne `tags` par défaut pour un tag jamais vu (auto-découverte). */
 async function ensureTagExists(name: string) {
   if (tagCache.has(name)) return;
@@ -113,6 +131,7 @@ async function ensureTagExists(name: string) {
      ON CONFLICT (name) DO NOTHING`,
     [name],
   );
+  await seedDemoRole(name);
   await refreshTagCache();
 }
 

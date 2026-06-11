@@ -132,9 +132,11 @@ FROM factors;
 -- ───────────────────────────────────────────────────────────────────────────
 -- 5. Démo : config OEE des 2 lignes du simulateur (cadence nominale 50/min,
 --    tag d'état = celui de l'embouteilleuse). Sans effet si déjà présent.
---    (Pré-requis : les compteurs .bouteilles_ok/_rebut ont les rôles ok/scrap.)
+--    (Les rôles ok/scrap des compteurs .bouteilles_ok/_rebut sont auto-assignés par
+--     la gateway à la découverte du tag — seedDemoRole ; cf. gateway/src/index.ts.)
 -- ───────────────────────────────────────────────────────────────────────────
+-- Cadences nominales = celles du simulateur (brain.py : blonde 50/min, ipa 40/min).
 INSERT INTO oee_line (line, label, ideal_rate, running_tag) VALUES
     ('brasserie.blonde', 'Ligne Blonde', 50, 'brasserie.blonde.embouteilleuse.state'),
-    ('brasserie.ipa',    'Ligne IPA',    50, 'brasserie.ipa.embouteilleuse.state')
+    ('brasserie.ipa',    'Ligne IPA',    40, 'brasserie.ipa.embouteilleuse.state')
 ON CONFLICT DO NOTHING;

@@ -199,8 +199,9 @@ Placement suggéré : un onglet **OEE** (ou une section de l'onglet Production e
 gérés proprement. Pas de recalcul côté front — uniquement de l'affichage.
 
 ### Pré-requis de données (à savoir)
-- Les compteurs de la ligne doivent avoir les **rôles `ok`/`scrap`** (`tag_role`, déjà géré via
-  l'onglet Production).
+- Les compteurs de la ligne doivent avoir les **rôles `ok`/`scrap`** (`tag_role`). Pour la démo
+  brasserie, la gateway les **auto-assigne** (`seedDemoRole`, à la découverte des tags
+  `.bouteilles_ok`/`.bouteilles_rebut`) ; sinon ça se règle via l'onglet Production.
 - Chaque ligne OEE doit avoir un **`running_tag`** configuré (sinon A et P = N/A).
 - `running_tag` = convention **canonique 1 = en marche** (sinon normaliser au bord).
 
