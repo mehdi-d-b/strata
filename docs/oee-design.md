@@ -178,13 +178,21 @@ calcul.
 | `ideal_rate` | number | cadence nominale (pièces/min) |
 | `availability`, `performance`, `quality` | number\|null | **0..1** (facteurs A/P/Q) |
 | `oee` | number\|null | **0..1** = A×P×Q |
+| `is_current` | bool | ce shift est-il **en cours** ? |
+| `elapsed_minutes` | number | temps **écoulé** du shift (= `planned_minutes` si terminé) |
+| `availability_elapsed` | number\|null | Dispo vs temps **écoulé** (pour un shift en cours : plus juste que `availability` qui compare aux 12 h entières) |
+| `target_oee` | number\|null | cible OEE (0..1) si définie |
+| `target_pieces` | int\|null | objectif de pièces du shift |
+| `projected_pieces` | int\|null | **projection** fin de shift à l'allure actuelle (= `produced` si terminé) |
+| `pieces_ratio` | number\|null | `produced / target_pieces` (pour la **barre de remplissage**) |
+| `on_track` | bool\|null | la projection atteint-elle la cible ? |
 
 ⚠️ **Les facteurs peuvent être `null`** (division par 0 : pas de marche, hors shift, 0 pièce, ou
 `running_tag` non configuré) → afficher **« — » / N/A**, jamais 0.
 
-**Config (admin)** — `GET/POST /api/oee-lines`, `DELETE /api/oee-lines/:line`. Champs :
-`line`, `label`, `ideal_rate` (req.), `running_tag`, `enabled`. (Une UI d'édition est *optionnelle* :
-la config marche déjà via SQL/seed ; à faire seulement si on veut éditer la cadence depuis le web.)
+**Config (admin)** — `GET/POST /api/oee-lines` + `DELETE /api/oee-lines/:line` (cadence/running_tag) ;
+`GET/POST /api/oee-targets` + `DELETE /api/oee-targets/:line` (cible OEE + objectif pièces). UI
+d'édition *optionnelle* (la config marche déjà via SQL/seed).
 
 ### Ce qu'il faut afficher (par ordre de valeur)
 
@@ -192,8 +200,15 @@ la config marche déjà via SQL/seed ; à faire seulement si on veut éditer la 
    couleur : `≥0.85` vert (world-class), `0.6–0.85` ambre, `<0.6` rouge. Repère 85 %.
 2. **Cascade des pertes (waterfall)** — *le plus important* : `100 % → ×A → ×P → ×Q → OEE`,
    chaque marche montrant la perte (dispo / perf / qualité). C'est ce qui dit **où agir**.
-3. **Tendance** : OEE par shift sur N jours (ligne/aires), filtrable par ligne.
-4. **Table** brute (ligne/jour/shift + A/P/Q/OEE + `produced`/`ok`) pour le détail.
+3. **Objectifs & barres de remplissage** (idée Mehdi, très efficace) : dans la table, **fond de
+   cellule rempli** proportionnellement à `pieces_ratio` (produced vs `target_pieces`) et à
+   `oee/target_oee` — vert si ≥ cible, ambre/rouge sinon. Affichage *data bar*.
+4. **Projection « à l'allure actuelle »** : pour un shift `is_current`, montrer
+   `produced → projected_pieces / target_pieces` + un badge **`on_track`** (✅/⚠️). C'est *la*
+   question opérateur (« vais-je tenir la cible ? »). Pour ce shift, utiliser
+   **`availability_elapsed`** (pas `availability`) pour ne pas afficher un faux 2 % en milieu de shift.
+5. **Tendance** : OEE par shift sur N jours (ligne/aires), filtrable par ligne.
+6. **Table** brute (ligne/jour/shift + A/P/Q/OEE + `produced`/`ok`) pour le détail.
 
 Placement suggéré : un onglet **OEE** (ou une section de l'onglet Production existant). États N/A
 gérés proprement. Pas de recalcul côté front — uniquement de l'affichage.

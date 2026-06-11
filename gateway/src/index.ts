@@ -682,15 +682,47 @@ app.get("/api/oee", async (req) => {
   const q = req.query as { days?: string };
   const days = Number(q.days ?? 7);
   const { rows } = await pool.query(
-    `SELECT line, line_label, day, shift_no, shift_label,
-            ok, produced, run_minutes, planned_minutes, ideal_rate,
-            availability, performance, quality, oee
-     FROM oee_by_shift
+    `SELECT * FROM oee_by_shift
      WHERE day > (now() - ($1 || ' days')::interval)::date
      ORDER BY day DESC, line ASC, shift_no ASC`,
     [days],
   );
   return rows;
+});
+
+// Objectifs OEE par ligne (cible OEE + objectif de pièces/shift). Admin.
+app.get("/api/oee-targets", { preHandler: requireAdmin }, async () => {
+  const { rows } = await pool.query(
+    "SELECT line, target_oee, target_pieces, enabled FROM oee_target ORDER BY line",
+  );
+  return rows;
+});
+
+app.post("/api/oee-targets", { preHandler: requireAdmin }, async (req, reply) => {
+  const b = req.body as {
+    line?: string;
+    target_oee?: number | null;
+    target_pieces?: number | null;
+    enabled?: boolean;
+  };
+  if (!b.line) return reply.code(400).send({ error: "line requis" });
+  await pool.query(
+    `INSERT INTO oee_target (line, target_oee, target_pieces, enabled)
+     VALUES ($1,$2,$3,COALESCE($4,true))
+     ON CONFLICT (line) DO UPDATE SET
+       target_oee=EXCLUDED.target_oee, target_pieces=EXCLUDED.target_pieces,
+       enabled=EXCLUDED.enabled`,
+    [b.line, b.target_oee ?? null, b.target_pieces ?? null, b.enabled],
+  );
+  await audit(req.user!.username, "oee_target.upsert", b.line);
+  return { ok: true };
+});
+
+app.delete("/api/oee-targets/:line", { preHandler: requireAdmin }, async (req) => {
+  const { line } = req.params as { line: string };
+  await pool.query("DELETE FROM oee_target WHERE line = $1", [line]);
+  await audit(req.user!.username, "oee_target.delete", line);
+  return { ok: true };
 });
 
 // Config OEE par ligne (cadence nominale + tag de marche). Réglage global -> admin.
