@@ -394,9 +394,32 @@ export type OeeRow = {
   performance: number | null;
   quality: number | null;
   oee: number | null;
+  // — Objectifs & projection fin de shift —
+  is_current: boolean;
+  elapsed_minutes: number;
+  /** Dispo vs temps écoulé (plus juste qu'`availability` pour un shift en cours). */
+  availability_elapsed: number | null;
+  target_oee: number | null;
+  target_pieces: number | null;
+  /** Projection fin de shift à l'allure actuelle (= produced si terminé). */
+  projected_pieces: number | null;
+  /** produced / target_pieces (barre de remplissage). */
+  pieces_ratio: number | null;
+  on_track: boolean | null;
 };
 
 export const fetchOee = (days: number) => api<OeeRow[]>(`/api/oee?days=${days}`);
+
+export type OeeTarget = {
+  line: string;
+  target_oee: number | null;
+  target_pieces: number | null;
+};
+export const fetchOeeTargets = () => api<OeeTarget[]>("/api/oee-targets");
+export const saveOeeTarget = (t: OeeTarget) =>
+  api<OeeTarget>("/api/oee-targets", { method: "POST", body: JSON.stringify(t) });
+export const deleteOeeTarget = (line: string) =>
+  api(`/api/oee-targets/${encodeURIComponent(line)}`, { method: "DELETE" });
 
 export type OeeLine = {
   line: string;
