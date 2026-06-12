@@ -447,6 +447,30 @@ export const fetchStopReasons = () => api<StopReason[]>("/api/stop-reasons");
 export const saveStopReason = (r: StopReason) =>
   api<StopReason>("/api/stop-reasons", { method: "POST", body: JSON.stringify(r) });
 
+/** Arrêt discret (trou de marche) à classer par l'opérateur. */
+export type OeeStop = {
+  line: string;
+  start_ts: string;
+  end_ts: string;
+  minutes: number;
+  derived_reason: string;
+  operator_reason: string | null;
+  note: string | null;
+  labeled_by: string | null;
+  /** Motif effectif = label opérateur sinon dérivé. */
+  reason_code: string;
+};
+export const fetchOeeStops = (days: number, line = "", minMinutes = 1) =>
+  api<OeeStop[]>(
+    `/api/oee/stops?days=${days}&line=${encodeURIComponent(line)}&min_minutes=${minMinutes}`,
+  );
+export const labelOeeStop = (body: {
+  line: string;
+  start_ts: string;
+  reason_code: string;
+  note?: string;
+}) => api<{ ok: boolean }>("/api/oee/stops/label", { method: "POST", body: JSON.stringify(body) });
+
 export type OeeLine = {
   line: string;
   label: string | null;

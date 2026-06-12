@@ -2,12 +2,16 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
+  ApiError,
   deleteOeeLine,
   deleteOeeTarget,
   fetchDowntime,
   fetchOee,
   fetchOeeLines,
+  fetchOeeStops,
   fetchOeeTargets,
+  fetchStopReasons,
+  labelOeeStop,
   saveOeeLine,
   saveOeeTarget,
   userIsAdmin,
@@ -15,7 +19,9 @@ import {
   type DowntimeRow,
   type OeeLine,
   type OeeRow,
+  type OeeStop,
   type OeeTarget,
+  type StopReason,
 } from "./api";
 import { useAuth } from "./auth";
 import { PageHeader } from "@/components/PageHeader";
@@ -865,12 +871,181 @@ function OeeConfig() {
   );
 }
 
+// ─── Arrêts à classer (reclassement opérateur) ───────────────────────────
+
+function fmtDateTime(iso: string) {
+  return new Date(iso).toLocaleString();
+}
+
+function OeeStops() {
+  const [stops, setStops] = useState<OeeStop[]>([]);
+  const [reasons, setReasons] = useState<StopReason[]>([]);
+  const [lineOptions, setLineOptions] = useState<{ line: string; label: string }[]>([]);
+  const [line, setLine] = useState("");
+  const [days, setDays] = useState(2);
+  const [minMin, setMinMin] = useState(2);
+  const [edit, setEdit] = useState<Record<string, { reason_code?: string; note?: string }>>({});
+
+  const keyOf = (s: OeeStop) => `${s.line}|${s.start_ts}`;
+
+  const load = () =>
+    fetchOeeStops(days, line, minMin)
+      .then((s) => {
+        setStops(s);
+        setEdit({});
+      })
+      .catch(() => setStops([]));
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [days, line, minMin]);
+  useEffect(() => {
+    fetchStopReasons().then(setReasons).catch(() => setReasons([]));
+    fetchOeeLines()
+      .then((ls) => setLineOptions(ls.map((l) => ({ line: l.line, label: l.label ?? l.line }))))
+      .catch(() => {});
+  }, []);
+
+  const reasonLabel = (code: string) => reasons.find((r) => r.code === code)?.label ?? code;
+  const curReason = (s: OeeStop) => edit[keyOf(s)]?.reason_code ?? s.reason_code;
+  const curNote = (s: OeeStop) => edit[keyOf(s)]?.note ?? s.note ?? "";
+  const patch = (s: OeeStop, p: { reason_code?: string; note?: string }) =>
+    setEdit((e) => ({ ...e, [keyOf(s)]: { ...e[keyOf(s)], ...p } }));
+
+  const classify = async (s: OeeStop) => {
+    try {
+      await labelOeeStop({
+        line: s.line,
+        start_ts: s.start_ts,
+        reason_code: curReason(s),
+        note: curNote(s) || undefined,
+      });
+      toast.success("Arrêt classé.");
+      load();
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError && err.status === 403
+          ? "Pas le droit de classer sur cette ligne."
+          : "Classement impossible.",
+      );
+    }
+  };
+
+  return (
+    <Section
+      title="Arrêts à classer"
+      hint="Pose le vrai motif sur chaque arrêt détecté (vérité terrain > dérivé). Nécessite le droit d'écriture sur la ligne."
+    >
+      <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
+        <select value={line} onChange={(e) => setLine(e.target.value)}>
+          <option value="">Toutes lignes</option>
+          {lineOptions.map((o) => (
+            <option key={o.line} value={o.line}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <label className="flex items-center gap-1.5 text-muted-foreground">
+          Période
+          <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
+            <option value={1}>1 j</option>
+            <option value={2}>2 j</option>
+            <option value={7}>7 j</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-1.5 text-muted-foreground">
+          Durée min
+          <Input
+            type="number"
+            className="w-20"
+            value={minMin}
+            onChange={(e) => setMinMin(Number(e.target.value))}
+          />
+          min
+        </label>
+      </div>
+
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Ligne</TableHead>
+            <TableHead>Début</TableHead>
+            <TableHead>Durée</TableHead>
+            <TableHead>Motif</TableHead>
+            <TableHead>Note</TableHead>
+            <TableHead>Classé par</TableHead>
+            <TableHead />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {stops.map((s) => {
+            const cur = curReason(s);
+            const inCatalogue = reasons.some((r) => r.code === cur);
+            return (
+              <TableRow key={keyOf(s)}>
+                <TableCell className="whitespace-nowrap">{s.line}</TableCell>
+                <TableCell className="tabular-nums whitespace-nowrap">
+                  {fmtDateTime(s.start_ts)}
+                </TableCell>
+                <TableCell className="tabular-nums">{fmtMin(s.minutes)}</TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-2">
+                    {!s.operator_reason && (
+                      <span className="size-2 shrink-0 rounded-full bg-warn" title="à classer" />
+                    )}
+                    <select value={cur} onChange={(e) => patch(s, { reason_code: e.target.value })}>
+                      {!inCatalogue && <option value={cur}>{reasonLabel(cur)} (dérivé)</option>}
+                      {reasons.map((r) => (
+                        <option key={r.code} value={r.code}>
+                          {r.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <Input
+                    className="w-44"
+                    value={curNote(s)}
+                    onChange={(e) => patch(s, { note: e.target.value })}
+                  />
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground">
+                  {s.labeled_by ?? "—"}
+                </TableCell>
+                <TableCell>
+                  <Button size="sm" onClick={() => classify(s)}>
+                    Classer
+                  </Button>
+                </TableCell>
+              </TableRow>
+            );
+          })}
+          {stops.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={7} className="text-muted-foreground">
+                Aucun arrêt sur la période (ou endpoint indisponible).
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+    </Section>
+  );
+}
+
 // ─── Vue (onglets) ───────────────────────────────────────────────────────
 
 export function OeeView() {
   const { user } = useAuth();
   const admin = userIsAdmin(user);
-  const [tab, setTab] = useState<"board" | "config">("board");
+  const [tab, setTab] = useState<"board" | "stops" | "config">("board");
+
+  const tabs: { id: "board" | "stops" | "config"; label: string }[] = [
+    { id: "board", label: "Tableau de bord" },
+    { id: "stops", label: "Arrêts à classer" },
+  ];
+  if (admin) tabs.push({ id: "config", label: "Configuration" });
 
   return (
     <>
@@ -878,18 +1053,10 @@ export function OeeView() {
         title="OEE"
         description="Disponibilité × Performance × Qualité, par ligne et par shift. Repère world-class : 85 %."
       />
-      {admin && (
-        <TabBar
-          tabs={[
-            { id: "board", label: "Tableau de bord" },
-            { id: "config", label: "Configuration" },
-          ]}
-          value={tab}
-          onChange={setTab}
-        />
-      )}
-      {(!admin || tab === "board") && <OeeBoard />}
-      {admin && tab === "config" && <OeeConfig />}
+      <TabBar tabs={tabs} value={tab} onChange={setTab} />
+      {tab === "board" && <OeeBoard />}
+      {tab === "stops" && <OeeStops />}
+      {tab === "config" && admin && <OeeConfig />}
     </>
   );
 }
