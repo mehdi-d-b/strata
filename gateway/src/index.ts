@@ -792,6 +792,45 @@ app.post("/api/oee/stops/label", { preHandler: requireAuth }, async (req, reply)
   return { ok: true };
 });
 
+// Pareto des pertes basé sur les ARRÊTS ÉTIQUETÉS (motif effectif = label sinon
+// dérivé) : précis et opérateur-aware (vs /api/oee/downtime, bucket 15 min). Par
+// ligne × motif sur la fenêtre. Même détection d'arrêt que /api/oee/stops.
+app.get("/api/oee/downtime/events", async (req) => {
+  const q = req.query as { days?: string; line?: string; min_minutes?: string };
+  const days = Number(q.days ?? 7);
+  const minMinutes = Number(q.min_minutes ?? 1);
+  const { rows } = await pool.query(
+    `WITH rt AS (
+        SELECT line, running_tag FROM oee_line
+        WHERE enabled AND running_tag IS NOT NULL AND ($2 = '' OR line = $2)
+     ),
+     runs AS (
+        SELECT rt.line, m.ts, lag(m.ts) OVER (PARTITION BY m.tag ORDER BY m.ts) AS prev_ts
+        FROM mesures m JOIN rt ON rt.running_tag = m.tag
+        WHERE m.value = 1 AND m.ts > now() - ($1 || ' days')::interval
+     ),
+     stops AS (
+        SELECT r.line, date_trunc('second', r.prev_ts) AS start_ts,
+               EXTRACT(EPOCH FROM (r.ts - r.prev_ts))/60.0 AS minutes
+        FROM runs r
+        WHERE r.prev_ts IS NOT NULL
+          AND EXTRACT(EPOCH FROM (r.ts - r.prev_ts))/60.0 >= $3
+     ),
+     classified AS (
+        SELECT s.line, COALESCE(lbl.reason_code, 'stopped') AS reason_code, s.minutes
+        FROM stops s
+        LEFT JOIN stop_event_label lbl ON lbl.line = s.line AND lbl.start_ts = s.start_ts
+     )
+     SELECT c.line, c.reason_code, sr.label AS reason_label, sr.kind, sr.color,
+            sum(c.minutes)::float8 AS minutes, count(*)::int AS stops
+     FROM classified c JOIN stop_reason sr ON sr.code = c.reason_code
+     GROUP BY c.line, c.reason_code, sr.label, sr.kind, sr.color
+     ORDER BY c.line ASC, minutes DESC`,
+    [days, q.line ?? "", minMinutes],
+  );
+  return rows;
+});
+
 // Objectifs OEE par ligne (cible OEE + objectif de pièces/shift). Admin.
 app.get("/api/oee-targets", { preHandler: requireAdmin }, async () => {
   const { rows } = await pool.query(

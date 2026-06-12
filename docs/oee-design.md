@@ -233,8 +233,15 @@ du `running_tag` (état 0/2 *ou* absence de données = ligne éteinte) :
 - **UI** : une liste d'arrêts (façon page Alarmes) avec un **sélecteur de motif** (catalogue
   `stop_reason`, dont des motifs *planifiés* : nettoyage, pause) ; afficher dérivé → effectif + qui/quand.
 
+**Pareto basé sur les arrêts étiquetés — fait.** `GET /api/oee/downtime/events?days=N&line=…&min_minutes=…`
+→ par **ligne × motif effectif** : `{line, reason_code, reason_label, kind, color, minutes, stops}`
+(motif = label opérateur sinon dérivé). C'est le Pareto **précis et opérateur-aware** : les
+reclassements y remontent directement (un arrêt classé « changement de série » s'y détache). À
+préférer à `/api/oee/downtime` (bucket 15 min) pour la **dispo** ; le bucket garde l'avantage du
+motif **perf** « Attente amont » (qui n'est pas un arrêt). Idéal : combiner les deux côté front.
+
 *v2 restant* : codes motif PLC (auto), durées exactes (sub-bucket), distinction planifié/non
-planifié dans le calcul, **Pareto basé sur les arrêts étiquetés** (vs l'approximation bucket actuelle).
+planifié **dans le calcul de l'OEE** (sortir les arrêts planifiés du temps planifié).
 
 ### Pré-requis de données (à savoir)
 - Les compteurs de la ligne doivent avoir les **rôles `ok`/`scrap`** (`tag_role`). Pour la démo

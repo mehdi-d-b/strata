@@ -125,8 +125,11 @@ Architecture **cerveau / faces** conçue pour accueillir les vraies faces en P6 
           marche = état 0/2 *ou* ligne éteinte) + étiquetage du vrai motif par l'opérateur
           (`GET /api/oee/stops`, `POST /api/oee/stops/label`, droit `write`, audité ; motif
           effectif = label sinon dérivé). Validé en live. Palette de motifs « terrain » seedée.
+    - [x] **Pareto basé sur les arrêts étiquetés** (`GET /api/oee/downtime/events`) : agrège les
+          arrêts détectés par **motif effectif** (label opérateur sinon dérivé) → les reclassements
+          remontent dans le Pareto. Validé en live.
     - [ ] *v2 restant* : codes motif PLC (auto), durées exactes (sub-bucket), distinction
-          planifié/non planifié, **Pareto basé sur les arrêts étiquetés**.
+          planifié/non planifié **dans le calcul OEE** (sortir les arrêts planifiés du PPT).
   - [ ] Cadence **par produit** + **calendrier d'arrêts planifiés** (sortir les pauses du PPT).
   - [ ] **OEE *live*** (RisingWave) : fenêtre glissante sub-seconde pour la **réactivité atelier**
         — andon (écran qui égraine l'OEE en direct), **alerte OEE** sous seuil (réutilise le modèle
