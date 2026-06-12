@@ -5,6 +5,36 @@
 > niveaux d'usage, la sécurité (règle d'or), et un plan d'adoption progressif.
 > Aucune implémentation n'existe encore — c'est la cible. Voir aussi la roadmap P9.
 
+## Décisions techniques actées (2026-06) — 100 % LOCAL, agent in-app
+
+Tranché : **assistant 100 % local / open-source, aucun cloud, aucun service payant.**
+
+- **Runtime** : **Ollama** (démarrer) puis **vLLM** (montée en charge) — exposent une **API
+  compatible OpenAI** (`/v1/chat/completions`). « Compatible OpenAI » = un **format de
+  requête standard de fait**, **pas** une connexion à OpenAI : tout tourne en local, aucune
+  donnée ne sort. Avantage : pas de lock-in (swap de runtime sans changer le code).
+- **Modèle** : open-weights avec **tool-calling** natif (**Qwen2.5**, Llama 3.1/3.3). Taille
+  selon le matériel (7-8B sur CPU/GPU grand public = Q&A simple ; 70B sur vrai GPU = raisonnement
+  multi-étapes fiable). ⚠️ Un petit modèle local est plus faible qu'un frontier sur les
+  enchaînements de tools → commencer par du **Q&A en lecture**.
+- **Architecture choisie = « Chemin B » (agent in-app)** : un **backend agent dans la gateway**
+  (`POST /api/assistant/chat`) qui appelle Ollama avec les tools et **exécute les tools avec la
+  session de l'utilisateur connecté** → le LLM hérite **automatiquement de son RBAC + audit**.
+  L'**UI chat = côté front** (chat dédié).
+- **Pas de MCP pour ce chemin** : MCP sert surtout aux **clients externes** (Claude Desktop,
+  Open WebUI). En in-app, les tools sont définis **dans la gateway** (appels internes) → un étage
+  et un hop en moins. MCP reste **ajoutable plus tard** si on veut exposer Strata à un client externe.
+- **Pas de LangChain** : la boucle d'agent (message → tool calls → exécution → réponse) fait
+  **~150 lignes** en TS contre l'API compatible-OpenAI. On garde le contrôle, pas de grosse
+  dépendance à breaking changes.
+- **Déploiement** : profil Docker **`ai`** (container `ollama` + l'agent dans la gateway ;
+  poids du modèle = un volume `ollama pull`). Le launcher gagne une case (cf. launcher-plan §10).
+- **RAG (plus tard, si besoin doc métier)** : **100 % local aussi** — `pgvector` (déjà ton
+  Postgres) + un modèle d'**embeddings local** (`bge-m3`, `nomic-embed-text` via Ollama).
+
+Le reste du document (règle d'or, niveaux d'usage, sécurité) **reste valable** — seul le runtime
+passe de « cloud ou local » à **local**, et on **commence sans MCP** (Chemin B).
+
 ## 0. La règle d'or (non négociable)
 
 **Le LLM est UN UTILISATEUR DE PLUS.** Il accède aux données et actions de Strata
