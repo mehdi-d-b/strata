@@ -121,9 +121,18 @@ Architecture **cerveau / faces** conçue pour accueillir les vraies faces en P6 
         (`running_tag` 0=Arrêt/2=Panne, `waiting_tag`=Attente amont), agrégat `oee_reason_buckets`
         + vue `oee_downtime_by_shift` + `GET /api/oee/downtime` + catalogue `stop_reason` éditable.
         Validé en live (la brasserie : Attente amont = perte #1, devant pannes/arrêts).
-    - [ ] *v2* : codes motif PLC, **reclassement opérateur** des arrêts, durées exactes
-          (détection d'intervalle), distinction planifié/non planifié.
+    - [x] **Reclassement opérateur** : détection d'arrêts discrets (trou entre échantillons en
+          marche = état 0/2 *ou* ligne éteinte) + étiquetage du vrai motif par l'opérateur
+          (`GET /api/oee/stops`, `POST /api/oee/stops/label`, droit `write`, audité ; motif
+          effectif = label sinon dérivé). Validé en live. Palette de motifs « terrain » seedée.
+    - [ ] *v2 restant* : codes motif PLC (auto), durées exactes (sub-bucket), distinction
+          planifié/non planifié, **Pareto basé sur les arrêts étiquetés**.
   - [ ] Cadence **par produit** + **calendrier d'arrêts planifiés** (sortir les pauses du PPT).
+  - [ ] **OEE *live*** (RisingWave) : fenêtre glissante sub-seconde pour la **réactivité atelier**
+        — andon (écran qui égraine l'OEE en direct), **alerte OEE** sous seuil (réutilise le modèle
+        d'alarmes `source='derived'`), capter les micro-arrêts que les buckets 15 min lissent.
+        À distinguer du **batch** actuel (reporting manager). ⚠️ *Ne vaut que si quelqu'un AGIT*
+        *sur le chiffre temps réel* (opérateur / alerte / andon) ; sinon le batch suffit.
 - [ ] **Prévision de séries — TimesFM** (Google). Service Python séparé : lit l'historique
       (`/api/history` ou Timescale en lecture), réinjecte les prévisions comme tags
       `source: forecast` (ex `...temperature.forecast`) → absorbés par le contrat `tags.raw`,

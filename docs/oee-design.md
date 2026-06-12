@@ -220,8 +220,21 @@ gérés proprement. Pas de recalcul côté front — uniquement de l'affichage.
 **Motifs d'arrêt — v1 (dérivés, fait)** : les motifs sont *déduits* des signaux, sans saisie
 opérateur — `running_tag` code 2 → **Panne/Défaut**, code 0 → **Arrêt** (dispo) ; `waiting_tag`=1
 → **Attente amont** (perf). Catalogue éditable : `GET/POST /api/stop-reasons`. Granularité 15 min
-(approximation bucket). *v2* : codes motif PLC, **reclassement opérateur** des arrêts, durées
-exactes (détection d'intervalle), distinction planifié/non planifié.
+(approximation bucket).
+
+**Reclassement opérateur — fait.** L'opérateur voit des **arrêts discrets** et leur pose le
+**vrai motif** (vérité terrain > dérivé). Un arrêt = un **trou entre deux échantillons en marche**
+du `running_tag` (état 0/2 *ou* absence de données = ligne éteinte) :
+- **`GET /api/oee/stops?days=N&line=…&min_minutes=…`** (auth) → arrêts détectés :
+  `{line, start_ts, end_ts, minutes, derived_reason, operator_reason, note, labeled_by, reason_code}`
+  (`reason_code` = **motif effectif** = label opérateur sinon dérivé). `min_minutes` filtre le bruit.
+- **`POST /api/oee/stops/label`** `{line, start_ts, reason_code, note}` (auth + **droit `write`** sur
+  la ligne) → étiquette l'arrêt (clé = ligne + `start_ts` tronqué à la seconde), audité.
+- **UI** : une liste d'arrêts (façon page Alarmes) avec un **sélecteur de motif** (catalogue
+  `stop_reason`, dont des motifs *planifiés* : nettoyage, pause) ; afficher dérivé → effectif + qui/quand.
+
+*v2 restant* : codes motif PLC (auto), durées exactes (sub-bucket), distinction planifié/non
+planifié dans le calcul, **Pareto basé sur les arrêts étiquetés** (vs l'approximation bucket actuelle).
 
 ### Pré-requis de données (à savoir)
 - Les compteurs de la ligne doivent avoir les **rôles `ok`/`scrap`** (`tag_role`). Pour la démo

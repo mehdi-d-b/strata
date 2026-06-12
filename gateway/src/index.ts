@@ -734,6 +734,64 @@ app.post("/api/stop-reasons", { preHandler: requireAdmin }, async (req, reply) =
   return { ok: true };
 });
 
+// Arrêts détectés (intervalles) + motif effectif (label opérateur sinon dérivé).
+// Détection par change-points sur le running_tag, fenêtre bornée par `days`.
+app.get("/api/oee/stops", { preHandler: requireAuth }, async (req) => {
+  const q = req.query as { days?: string; line?: string; min_minutes?: string };
+  const days = Number(q.days ?? 2);
+  const minMinutes = Number(q.min_minutes ?? 1);
+  // Un arrêt = un TROU entre deux échantillons « en marche » (value=1) du running_tag
+  // — qu'il s'agisse d'un état 0/2 OU d'une absence de données (ligne éteinte). C'est
+  // ce qui donne des arrêts substantiels et classables (vs des micro-dips < 1 s).
+  const { rows } = await pool.query(
+    `WITH rt AS (
+        SELECT line, running_tag FROM oee_line
+        WHERE enabled AND running_tag IS NOT NULL AND ($2 = '' OR line = $2)
+     ),
+     runs AS (
+        SELECT rt.line, m.ts,
+               lag(m.ts) OVER (PARTITION BY m.tag ORDER BY m.ts) AS prev_ts
+        FROM mesures m JOIN rt ON rt.running_tag = m.tag
+        WHERE m.value = 1 AND m.ts > now() - ($1 || ' days')::interval
+     )
+     SELECT r.line,
+            date_trunc('second', r.prev_ts) AS start_ts,
+            r.ts      AS end_ts,
+            (EXTRACT(EPOCH FROM (r.ts - r.prev_ts))/60.0)::float8 AS minutes,
+            'stopped'::text AS derived_reason,
+            lbl.reason_code AS operator_reason, lbl.note, lbl.labeled_by,
+            COALESCE(lbl.reason_code, 'stopped') AS reason_code
+     FROM runs r
+     LEFT JOIN stop_event_label lbl
+            ON lbl.line = r.line AND lbl.start_ts = date_trunc('second', r.prev_ts)
+     WHERE r.prev_ts IS NOT NULL
+       AND EXTRACT(EPOCH FROM (r.ts - r.prev_ts))/60.0 >= $3
+     ORDER BY r.ts DESC
+     LIMIT 500`,
+    [days, q.line ?? "", minMinutes],
+  );
+  return rows;
+});
+
+// L'opérateur étiquette un arrêt (motif réel). Droit write sur la ligne.
+app.post("/api/oee/stops/label", { preHandler: requireAuth }, async (req, reply) => {
+  const b = req.body as { line?: string; start_ts?: string; reason_code?: string; note?: string };
+  if (!b.line || !b.start_ts || !b.reason_code)
+    return reply.code(400).send({ error: "line, start_ts, reason_code requis" });
+  if (!can(req.user, "write", b.line))
+    return reply.code(403).send({ error: `pas le droit de classer un arrêt sur ${b.line}` });
+  await pool.query(
+    `INSERT INTO stop_event_label (line, start_ts, reason_code, note, labeled_by)
+     VALUES ($1, date_trunc('second', $2::timestamptz), $3, $4, $5)
+     ON CONFLICT (line, start_ts) DO UPDATE SET
+       reason_code=EXCLUDED.reason_code, note=EXCLUDED.note,
+       labeled_by=EXCLUDED.labeled_by, labeled_at=now()`,
+    [b.line, b.start_ts, b.reason_code, b.note ?? null, req.user!.username],
+  );
+  await audit(req.user!.username, "stop.label", b.line, { start_ts: b.start_ts, reason: b.reason_code });
+  return { ok: true };
+});
+
 // Objectifs OEE par ligne (cible OEE + objectif de pièces/shift). Admin.
 app.get("/api/oee-targets", { preHandler: requireAdmin }, async () => {
   const { rows } = await pool.query(
