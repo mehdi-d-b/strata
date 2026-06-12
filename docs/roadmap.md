@@ -112,7 +112,15 @@ Architecture **cerveau / faces** conçue pour accueillir les vraies faces en P6 
       déjà conçu indépendant du détecteur, `source: rule|tag`, pour basculer vers RisingWave
       **sans toucher l'UI**). Aussi : alarmes dérivées multi-tags, fenêtres glissantes.
 - [ ] SCADA / synoptiques (vues schématiques animées par les tags)
-- [ ] OEE complet (dispo × perf × qualité)
+- [x] **OEE complet** (Disponibilité × Performance × Qualité) — backend (vues Timescale
+      `oee_by_shift` + `/api/oee`), config par ligne (`oee_line`), **objectifs + projection
+      fin de shift** (`oee_target`, `pieces_ratio` pour barres de remplissage, `on_track`), page
+      web (jauges, cascade des pertes, tendance). Conception : [docs/oee-design.md](oee-design.md).
+      Validé en live sur la brasserie.
+  - [ ] *Suite (le gros levier)* : **codes motif d'arrêt** → Pareto des pertes (« où agir »).
+        Demande une saisie (tag motif ou clic opérateur) ; bonus gratuit : `.en_attente` du
+        simulateur = 1er motif réel. Aussi : cadence **par produit**, **calendrier d'arrêts
+        planifiés** (sortir les pauses du temps planifié).
 - [ ] **Prévision de séries — TimesFM** (Google). Service Python séparé : lit l'historique
       (`/api/history` ou Timescale en lecture), réinjecte les prévisions comme tags
       `source: forecast` (ex `...temperature.forecast`) → absorbés par le contrat `tags.raw`,
@@ -217,3 +225,18 @@ rétention sans toucher au SQL »).
 - [ ] **Serveur MCP « Strata »** wrappant l'API gateway (compte de service RBAC, lecture seule
       d'abord) + LLM local (Ollama/vLLM) ou API. Copilote de questions → analyste d'anomalies
       (via RisingWave) → action encadrée. **RAG = optionnel/ultérieur** (docs métier seulement).
+
+### Documentation utilisateur / aide en ligne (in-app)
+But : qu'un **utilisateur non-tech** découvre **toutes** les features et **comment les utiliser**.
+À distinguer des docs **dev/infra** existantes (`docs/`, ce fichier) : ici c'est du **produit/end-user**.
+- [ ] **Doc d'utilisation ultra-précise de l'interface** : couvrir CHAQUE vue (Explorer,
+      Dashboards, Alarmes, Production, OEE, Automates, écriture de consignes, Paramètres,
+      comptes/RBAC) — le *comment*, pas juste le *quoi*. Captures/exemples.
+- [ ] **Accessible DEPUIS l'interface** (pas qu'un PDF externe) : un **centre d'aide / « wiki »
+      intégré, moderne et cherchable**. Pistes :
+      - pages rendues depuis du **Markdown** (contenu versionné, facile à maintenir, proche du code) ;
+      - **recherche** branchée sur la palette de commandes **⌘K** déjà en place ;
+      - **aide contextuelle** par page (bouton « ? » → la rubrique correspondante) ;
+      - optionnel : **tour d'onboarding** au 1er login, tooltips.
+- [ ] Frontière : c'est du **front** (chat dédié) ; le contenu vit près du code (`web/help/` ou
+      `docs/user/`) pour évoluer avec les features. Le backend peut servir le Markdown si besoin.
