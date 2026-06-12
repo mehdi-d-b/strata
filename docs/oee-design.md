@@ -207,11 +207,21 @@ d'édition *optionnelle* (la config marche déjà via SQL/seed).
    `produced → projected_pieces / target_pieces` + un badge **`on_track`** (✅/⚠️). C'est *la*
    question opérateur (« vais-je tenir la cible ? »). Pour ce shift, utiliser
    **`availability_elapsed`** (pas `availability`) pour ne pas afficher un faux 2 % en milieu de shift.
-5. **Tendance** : OEE par shift sur N jours (ligne/aires), filtrable par ligne.
-6. **Table** brute (ligne/jour/shift + A/P/Q/OEE + `produced`/`ok`) pour le détail.
+5. **Pareto des motifs d'arrêt** — *le gros levier (« où agir »).* Barres horizontales triées des
+   pertes par motif (couleur du motif), groupables par `kind` (dispo / perf). Source :
+   **`GET /api/oee/downtime?days=N`** → lignes `{line, day, shift_no, reason_code, reason_label,
+   kind, color, minutes}`. Idéalement clic depuis la perte de Dispo/Perf de la cascade → le Pareto.
+6. **Tendance** : OEE par shift sur N jours (ligne/aires), filtrable par ligne.
+7. **Table** brute (ligne/jour/shift + A/P/Q/OEE + `produced`/`ok`) pour le détail.
 
 Placement suggéré : un onglet **OEE** (ou une section de l'onglet Production existant). États N/A
 gérés proprement. Pas de recalcul côté front — uniquement de l'affichage.
+
+**Motifs d'arrêt — v1 (dérivés, fait)** : les motifs sont *déduits* des signaux, sans saisie
+opérateur — `running_tag` code 2 → **Panne/Défaut**, code 0 → **Arrêt** (dispo) ; `waiting_tag`=1
+→ **Attente amont** (perf). Catalogue éditable : `GET/POST /api/stop-reasons`. Granularité 15 min
+(approximation bucket). *v2* : codes motif PLC, **reclassement opérateur** des arrêts, durées
+exactes (détection d'intervalle), distinction planifié/non planifié.
 
 ### Pré-requis de données (à savoir)
 - Les compteurs de la ligne doivent avoir les **rôles `ok`/`scrap`** (`tag_role`). Pour la démo

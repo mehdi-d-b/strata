@@ -690,6 +690,50 @@ app.get("/api/oee", async (req) => {
   return rows;
 });
 
+// Motifs d'arrêt : minutes de perte par motif × ligne × shift (Pareto). Ouvert.
+app.get("/api/oee/downtime", async (req) => {
+  const q = req.query as { days?: string };
+  const days = Number(q.days ?? 7);
+  const { rows } = await pool.query(
+    `SELECT line, day, shift_no, reason_code, reason_label, kind, color, minutes
+     FROM oee_downtime_by_shift
+     WHERE day > (now() - ($1 || ' days')::interval)::date
+     ORDER BY day DESC, line ASC, minutes DESC`,
+    [days],
+  );
+  return rows;
+});
+
+// Catalogue de motifs d'arrêt (label/type/couleur). Édition -> admin.
+app.get("/api/stop-reasons", async () => {
+  const { rows } = await pool.query(
+    "SELECT code, label, kind, planned, color FROM stop_reason ORDER BY kind, code",
+  );
+  return rows;
+});
+
+app.post("/api/stop-reasons", { preHandler: requireAdmin }, async (req, reply) => {
+  const b = req.body as {
+    code?: string;
+    label?: string;
+    kind?: string;
+    planned?: boolean;
+    color?: string;
+  };
+  if (!b.code || !b.label || !b.kind)
+    return reply.code(400).send({ error: "code, label, kind requis" });
+  await pool.query(
+    `INSERT INTO stop_reason (code, label, kind, planned, color)
+     VALUES ($1,$2,$3,COALESCE($4,false),$5)
+     ON CONFLICT (code) DO UPDATE SET
+       label=EXCLUDED.label, kind=EXCLUDED.kind,
+       planned=EXCLUDED.planned, color=EXCLUDED.color`,
+    [b.code, b.label, b.kind, b.planned, b.color ?? null],
+  );
+  await audit(req.user!.username, "stop_reason.upsert", b.code);
+  return { ok: true };
+});
+
 // Objectifs OEE par ligne (cible OEE + objectif de pièces/shift). Admin.
 app.get("/api/oee-targets", { preHandler: requireAdmin }, async () => {
   const { rows } = await pool.query(

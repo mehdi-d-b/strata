@@ -117,10 +117,13 @@ Architecture **cerveau / faces** conçue pour accueillir les vraies faces en P6 
       fin de shift** (`oee_target`, `pieces_ratio` pour barres de remplissage, `on_track`), page
       web (jauges, cascade des pertes, tendance). Conception : [docs/oee-design.md](oee-design.md).
       Validé en live sur la brasserie.
-  - [ ] *Suite (le gros levier)* : **codes motif d'arrêt** → Pareto des pertes (« où agir »).
-        Demande une saisie (tag motif ou clic opérateur) ; bonus gratuit : `.en_attente` du
-        simulateur = 1er motif réel. Aussi : cadence **par produit**, **calendrier d'arrêts
-        planifiés** (sortir les pauses du temps planifié).
+  - [x] **Motifs d'arrêt — Pareto des pertes** (« où agir ») : v1 **dérivés** des signaux
+        (`running_tag` 0=Arrêt/2=Panne, `waiting_tag`=Attente amont), agrégat `oee_reason_buckets`
+        + vue `oee_downtime_by_shift` + `GET /api/oee/downtime` + catalogue `stop_reason` éditable.
+        Validé en live (la brasserie : Attente amont = perte #1, devant pannes/arrêts).
+    - [ ] *v2* : codes motif PLC, **reclassement opérateur** des arrêts, durées exactes
+          (détection d'intervalle), distinction planifié/non planifié.
+  - [ ] Cadence **par produit** + **calendrier d'arrêts planifiés** (sortir les pauses du PPT).
 - [ ] **Prévision de séries — TimesFM** (Google). Service Python séparé : lit l'historique
       (`/api/history` ou Timescale en lecture), réinjecte les prévisions comme tags
       `source: forecast` (ex `...temperature.forecast`) → absorbés par le contrat `tags.raw`,
