@@ -1,13 +1,28 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import {
+  deleteOeeLine,
+  deleteOeeTarget,
   fetchDowntime,
   fetchOee,
+  fetchOeeLines,
+  fetchOeeTargets,
+  saveOeeLine,
+  saveOeeTarget,
+  userIsAdmin,
   type DowntimeKind,
   type DowntimeRow,
+  type OeeLine,
   type OeeRow,
+  type OeeTarget,
 } from "./api";
+import { useAuth } from "./auth";
 import { PageHeader } from "@/components/PageHeader";
 import { Section } from "@/components/Section";
+import { TabBar } from "@/components/TabBar";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Table,
@@ -410,9 +425,9 @@ function ParetoSection({
   );
 }
 
-// ─── Vue ─────────────────────────────────────────────────────────────────
+// ─── Tableau de bord ─────────────────────────────────────────────────────
 
-export function OeeView() {
+function OeeBoard() {
   const [days, setDays] = useState(7);
   const [rows, setRows] = useState<OeeRow[]>([]);
   const [downtime, setDowntime] = useState<DowntimeRow[]>([]);
@@ -450,19 +465,15 @@ export function OeeView() {
 
   return (
     <>
-      <PageHeader
-        title="OEE"
-        description="Disponibilité × Performance × Qualité, par ligne et par shift. Repère world-class : 85 %."
-        actions={
-          <div className="range">
-            {DAYS.map((d) => (
-              <button key={d.v} className={days === d.v ? "active" : ""} onClick={() => setDays(d.v)}>
-                {d.label}
-              </button>
-            ))}
-          </div>
-        }
-      />
+      <div className="toolbar">
+        <div className="range">
+          {DAYS.map((d) => (
+            <button key={d.v} className={days === d.v ? "active" : ""} onClick={() => setDays(d.v)}>
+              {d.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {lines.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
@@ -545,6 +556,340 @@ export function OeeView() {
           </Table>
         </Section>
       )}
+    </>
+  );
+}
+
+// ─── Configuration (admin) : lignes (cadence) + objectifs ────────────────
+
+function OeeConfig() {
+  const [lines, setLines] = useState<OeeLine[]>([]);
+  const [targets, setTargets] = useState<OeeTarget[]>([]);
+  const [nl, setNl] = useState({ line: "", label: "", ideal_rate: 60, running_tag: "" });
+  const [nt, setNt] = useState({ line: "", target_oee: 80, target_pieces: 0 });
+
+  const load = () => {
+    fetchOeeLines().then(setLines).catch(() => setLines([]));
+    fetchOeeTargets().then(setTargets).catch(() => setTargets([]));
+  };
+  useEffect(() => {
+    load();
+  }, []);
+
+  const patchLine = (line: string, p: Partial<OeeLine>) =>
+    setLines((ls) => ls.map((l) => (l.line === line ? { ...l, ...p } : l)));
+  const saveLine = async (l: OeeLine) => {
+    try {
+      await saveOeeLine(l);
+      toast.success("Ligne enregistrée.");
+      load();
+    } catch {
+      toast.error("Enregistrement impossible.");
+    }
+  };
+  const addLine = async () => {
+    if (!nl.line.trim()) return;
+    try {
+      await saveOeeLine({
+        line: nl.line.trim(),
+        label: nl.label || null,
+        ideal_rate: nl.ideal_rate,
+        running_tag: nl.running_tag || null,
+        enabled: true,
+      });
+      setNl({ line: "", label: "", ideal_rate: 60, running_tag: "" });
+      load();
+    } catch {
+      toast.error("Création impossible.");
+    }
+  };
+
+  const patchTarget = (line: string, p: Partial<OeeTarget>) =>
+    setTargets((ts) => ts.map((t) => (t.line === line ? { ...t, ...p } : t)));
+  const saveT = async (t: OeeTarget) => {
+    try {
+      await saveOeeTarget(t);
+      toast.success("Objectif enregistré.");
+      load();
+    } catch {
+      toast.error("Enregistrement impossible.");
+    }
+  };
+  const addT = async () => {
+    if (!nt.line.trim()) return;
+    try {
+      await saveOeeTarget({
+        line: nt.line,
+        target_oee: nt.target_oee ? nt.target_oee / 100 : null,
+        target_pieces: nt.target_pieces || null,
+      });
+      setNt({ line: "", target_oee: 80, target_pieces: 0 });
+      load();
+    } catch {
+      toast.error("Création impossible.");
+    }
+  };
+
+  return (
+    <>
+      <Section
+        title="Lignes OEE (cadence & tag de marche)"
+        hint={
+          <>
+            La <strong>cadence nominale</strong> (pièces/min) et le <strong>tag « running »</strong>{" "}
+            (convention 1 = en marche) par ligne. Sans tag running, Dispo et Perf restent N/A.
+          </>
+        }
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Ligne</TableHead>
+              <TableHead>Libellé</TableHead>
+              <TableHead>Cadence (p/min)</TableHead>
+              <TableHead>Tag running</TableHead>
+              <TableHead>Actif</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {lines.map((l) => (
+              <TableRow key={l.line}>
+                <TableCell>
+                  <code className="text-[var(--chart-2)]">{l.line}</code>
+                </TableCell>
+                <TableCell>
+                  <Input
+                    className="w-40"
+                    value={l.label ?? ""}
+                    onChange={(e) => patchLine(l.line, { label: e.target.value })}
+                  />
+                </TableCell>
+                <TableCell>
+                  <Input
+                    type="number"
+                    step="any"
+                    className="w-24"
+                    value={l.ideal_rate}
+                    onChange={(e) => patchLine(l.line, { ideal_rate: Number(e.target.value) })}
+                  />
+                </TableCell>
+                <TableCell>
+                  <Input
+                    className="w-56"
+                    value={l.running_tag ?? ""}
+                    onChange={(e) => patchLine(l.line, { running_tag: e.target.value })}
+                  />
+                </TableCell>
+                <TableCell>
+                  <input
+                    type="checkbox"
+                    checked={l.enabled}
+                    onChange={(e) => patchLine(l.line, { enabled: e.target.checked })}
+                  />
+                </TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-1">
+                    <Button size="sm" onClick={() => saveLine(l)}>
+                      Enregistrer
+                    </Button>
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive"
+                      title="Supprimer"
+                      onClick={() => deleteOeeLine(l.line).then(load)}
+                    >
+                      <Trash2 />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+            {lines.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={6} className="text-muted-foreground">
+                  Aucune ligne configurée.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <Input
+            className="w-48"
+            placeholder="ligne (ex: brasserie.blonde)"
+            value={nl.line}
+            onChange={(e) => setNl({ ...nl, line: e.target.value })}
+          />
+          <Input
+            className="w-40"
+            placeholder="libellé"
+            value={nl.label}
+            onChange={(e) => setNl({ ...nl, label: e.target.value })}
+          />
+          <Input
+            type="number"
+            step="any"
+            className="w-24"
+            placeholder="cadence"
+            value={nl.ideal_rate}
+            onChange={(e) => setNl({ ...nl, ideal_rate: Number(e.target.value) })}
+          />
+          <Input
+            className="w-56"
+            placeholder="tag running (ex: brasserie.blonde.embouteilleuse.running)"
+            value={nl.running_tag}
+            onChange={(e) => setNl({ ...nl, running_tag: e.target.value })}
+          />
+          <Button size="sm" variant="outline" onClick={addLine}>
+            <Plus />
+            Ajouter
+          </Button>
+        </div>
+      </Section>
+
+      <Section
+        title="Objectifs par ligne (cible OEE & pièces)"
+        hint="Cible OEE en % ; objectif de pièces par shift. Alimentent les barres de remplissage et la projection."
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Ligne</TableHead>
+              <TableHead>Cible OEE (%)</TableHead>
+              <TableHead>Objectif pièces</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {targets.map((t) => (
+              <TableRow key={t.line}>
+                <TableCell>
+                  <code className="text-[var(--chart-2)]">{t.line}</code>
+                </TableCell>
+                <TableCell>
+                  <Input
+                    type="number"
+                    step="any"
+                    className="w-24"
+                    value={t.target_oee == null ? "" : Math.round(t.target_oee * 100)}
+                    onChange={(e) =>
+                      patchTarget(t.line, {
+                        target_oee: e.target.value === "" ? null : Number(e.target.value) / 100,
+                      })
+                    }
+                  />
+                </TableCell>
+                <TableCell>
+                  <Input
+                    type="number"
+                    className="w-28"
+                    value={t.target_pieces ?? ""}
+                    onChange={(e) =>
+                      patchTarget(t.line, {
+                        target_pieces: e.target.value === "" ? null : Number(e.target.value),
+                      })
+                    }
+                  />
+                </TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-1">
+                    <Button size="sm" onClick={() => saveT(t)}>
+                      Enregistrer
+                    </Button>
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive"
+                      title="Supprimer"
+                      onClick={() => deleteOeeTarget(t.line).then(load)}
+                    >
+                      <Trash2 />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+            {targets.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={4} className="text-muted-foreground">
+                  Aucun objectif défini.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          {lines.length > 0 ? (
+            <select value={nt.line} onChange={(e) => setNt({ ...nt, line: e.target.value })}>
+              <option value="">— ligne —</option>
+              {lines.map((l) => (
+                <option key={l.line} value={l.line}>
+                  {l.label ?? l.line}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <Input
+              className="w-48"
+              placeholder="ligne"
+              value={nt.line}
+              onChange={(e) => setNt({ ...nt, line: e.target.value })}
+            />
+          )}
+          <Input
+            type="number"
+            step="any"
+            className="w-24"
+            placeholder="cible %"
+            value={nt.target_oee}
+            onChange={(e) => setNt({ ...nt, target_oee: Number(e.target.value) })}
+          />
+          <Input
+            type="number"
+            className="w-28"
+            placeholder="pièces"
+            value={nt.target_pieces}
+            onChange={(e) => setNt({ ...nt, target_pieces: Number(e.target.value) })}
+          />
+          <Button size="sm" variant="outline" onClick={addT}>
+            <Plus />
+            Ajouter
+          </Button>
+        </div>
+      </Section>
+    </>
+  );
+}
+
+// ─── Vue (onglets) ───────────────────────────────────────────────────────
+
+export function OeeView() {
+  const { user } = useAuth();
+  const admin = userIsAdmin(user);
+  const [tab, setTab] = useState<"board" | "config">("board");
+
+  return (
+    <>
+      <PageHeader
+        title="OEE"
+        description="Disponibilité × Performance × Qualité, par ligne et par shift. Repère world-class : 85 %."
+      />
+      {admin && (
+        <TabBar
+          tabs={[
+            { id: "board", label: "Tableau de bord" },
+            { id: "config", label: "Configuration" },
+          ]}
+          value={tab}
+          onChange={setTab}
+        />
+      )}
+      {(!admin || tab === "board") && <OeeBoard />}
+      {admin && tab === "config" && <OeeConfig />}
     </>
   );
 }
