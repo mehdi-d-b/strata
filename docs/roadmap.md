@@ -236,10 +236,16 @@ rétention sans toucher au SQL »).
       RisingWave joignables ?, profils actifs). Limite assumée : la gateway ne voit que de
       l'intérieur ; le monitoring infra « vrai » reste externe (Console, Grafana).
 
-### Assistant IA (cf. docs/llm-integration.md)
-- [ ] **Serveur MCP « Strata »** wrappant l'API gateway (compte de service RBAC, lecture seule
-      d'abord) + LLM local (Ollama/vLLM) ou API. Copilote de questions → analyste d'anomalies
-      (via RisingWave) → action encadrée. **RAG = optionnel/ultérieur** (docs métier seulement).
+### Assistant IA — 100 % local (cf. docs/llm-integration.md)
+- [x] **v1 — agent in-app (Chemin B)** : profil Docker `ai` (**Ollama**, modèle open-source
+      `qwen2.5:3b`), boucle d'agent dans la gateway (`POST /api/assistant/chat`) + **tools de
+      lecture** (`get_oee`, `get_production`, `list_alarms`, `get_history`) exécutés côté gateway.
+      Le LLM ne touche jamais la base (il propose des tool-calls, la gateway exécute). **Validé en
+      live** : qwen2.5:3b a appelé `get_oee` et répondu le bon chiffre (~49 s CPU). UI chat = front.
+      *Pas de MCP* (inutile en in-app) ni LangChain (boucle directe).
+- [ ] **v2** : `describe_schema` + `query_readonly` (bac à sable read-only pour les questions
+      imprévues), **action encadrée** (write via gateway + confirmation), vrai modèle/GPU.
+      **RAG** = optionnel/ultérieur (docs métier ; pgvector + embeddings locaux).
 
 ### Documentation utilisateur / aide en ligne (in-app)
 But : qu'un **utilisateur non-tech** découvre **toutes** les features et **comment les utiliser**.

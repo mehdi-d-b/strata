@@ -32,6 +32,7 @@ import {
 } from "./auth.js";
 import { deployDevice, undeployDevice } from "./plc4x.js";
 import { AlarmEngine } from "./alarms.js";
+import { runAssistant, type ChatMessage } from "./assistant.js";
 
 const KAFKA_BROKERS = (process.env.KAFKA_BROKERS ?? "redpanda:9092").split(",");
 const PG_DSN =
@@ -829,6 +830,23 @@ app.get("/api/oee/downtime/events", async (req) => {
     [days, q.line ?? "", minMinutes],
   );
   return rows;
+});
+
+// ─── Assistant IA local (profil `ai`, Ollama) — cf. docs/llm-integration.md ──
+// Chemin B : la boucle d'agent vit ici, les tools (lecture) s'exécutent avec le
+// contexte de l'utilisateur connecté. Le LLM ne touche jamais la base en direct.
+app.post("/api/assistant/chat", { preHandler: requireAuth }, async (req, reply) => {
+  const b = req.body as { messages?: ChatMessage[]; message?: string };
+  const history: ChatMessage[] =
+    b.messages?.length ? b.messages : b.message ? [{ role: "user", content: b.message }] : [];
+  if (!history.length) return reply.code(400).send({ error: "messages ou message requis" });
+  try {
+    const out = await runAssistant(pool, req.user, history);
+    await audit(req.user!.username, "assistant.chat", null, { steps: out.steps });
+    return out;
+  } catch (e) {
+    return reply.code(502).send({ error: `assistant indisponible (profil ai démarré ?): ${(e as Error).message}` });
+  }
 });
 
 // Objectifs OEE par ligne (cible OEE + objectif de pièces/shift). Admin.

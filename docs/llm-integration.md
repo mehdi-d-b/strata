@@ -35,6 +35,31 @@ Tranché : **assistant 100 % local / open-source, aucun cloud, aucun service pay
 Le reste du document (règle d'or, niveaux d'usage, sécurité) **reste valable** — seul le runtime
 passe de « cloud ou local » à **local**, et on **commence sans MCP** (Chemin B).
 
+### Questions imprévues : schema-discovery + SQL en lecture seule (v2)
+
+Pour une question que les tools figés ne couvrent pas (un `SELECT` « exotique » sur
+RisingWave/Timescale), on ajoute deux tools — et **le LLM découvre le schéma en dynamique** :
+- **`describe_schema()` / `list_streams()`** → renvoie le **catalogue vivant** (MV RisingWave via
+  `SHOW MATERIALIZED VIEWS`, colonnes Timescale via `information_schema`). Le LLM **apprend** ce
+  qui existe au lieu de deviner.
+- **`query_readonly(sql)`** → le LLM écrit un `SELECT`, **la gateway l'exécute sur un rôle DB
+  READ-ONLY** (garde-fous : *SELECT only*, timeout, plafond de lignes, schémas autorisés). La
+  règle d'or tient : le LLM **propose**, la gateway est le **videur** ; jamais d'accès brut.
+
+⚠️ Écrire un SQL correct sur un schéma découvert demande un **modèle costaud** → c'est de la **v2**.
+
+### Dosage v1 / v2 (et matériel)
+
+- **v1 — FAIT (validé en live)** : profil Docker `ai` (Ollama + `qwen2.5:3b`), boucle d'agent
+  dans la gateway (`POST /api/assistant/chat`, `gateway/src/assistant.ts`) + tools de **lecture
+  figés** (`get_oee`, `get_production`, `list_alarms`, `get_history`). Test : le modèle a appelé
+  `get_oee` et répondu le bon OEE (sans halluciner), ~49 s sur CPU. UI chat = côté front.
+- **v2 (quand modèle capable + vrai GPU)** : `describe_schema` + `query_readonly` (bac à sable
+  read-only), puis tools d'**action encadrée** (write via gateway + confirmation humaine).
+- **Matériel** : accélération GPU **AMD/ROCm peu fiable** hors cartes récentes (et nulle en WSL2)
+  → souvent **CPU**. OK pour valider l'archi + Q&A simple (modèle 3B), pas pour la vitesse ni le
+  text-to-SQL. Le vrai assistant = vraie machine/GPU + modèle plus gros.
+
 ## 0. La règle d'or (non négociable)
 
 **Le LLM est UN UTILISATEUR DE PLUS.** Il accède aux données et actions de Strata
