@@ -421,6 +421,32 @@ export const saveOeeTarget = (t: OeeTarget) =>
 export const deleteOeeTarget = (line: string) =>
   api(`/api/oee-targets/${encodeURIComponent(line)}`, { method: "DELETE" });
 
+/** Type de perte d'un motif d'arrêt : disponibilité ou performance. */
+export type DowntimeKind = "dispo" | "perf";
+
+export type DowntimeRow = {
+  line: string;
+  day: string;
+  shift_no: number;
+  reason_code: string;
+  reason_label: string;
+  kind: DowntimeKind;
+  color: string;
+  minutes: number;
+};
+export const fetchDowntime = (days: number) =>
+  api<DowntimeRow[]>(`/api/oee/downtime?days=${days}`);
+
+export type StopReason = {
+  code: string;
+  label: string;
+  kind: DowntimeKind;
+  color: string;
+};
+export const fetchStopReasons = () => api<StopReason[]>("/api/stop-reasons");
+export const saveStopReason = (r: StopReason) =>
+  api<StopReason>("/api/stop-reasons", { method: "POST", body: JSON.stringify(r) });
+
 export type OeeLine = {
   line: string;
   label: string | null;

@@ -1,5 +1,11 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { fetchOee, type OeeRow } from "./api";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  fetchDowntime,
+  fetchOee,
+  type DowntimeKind,
+  type DowntimeRow,
+  type OeeRow,
+} from "./api";
 import { PageHeader } from "@/components/PageHeader";
 import { Section } from "@/components/Section";
 import { Card, CardContent } from "@/components/ui/card";
@@ -120,20 +126,22 @@ function Waterfall({
   p,
   q,
   oee,
+  onPickLoss,
 }: {
   a: number | null;
   p: number | null;
   q: number | null;
   oee: number | null;
+  onPickLoss?: (kind: DowntimeKind) => void;
 }) {
   if (a == null || p == null || q == null || oee == null) {
     return <div className="text-xs text-muted-foreground">Cascade indisponible (données incomplètes).</div>;
   }
   const segs = [
-    { label: "OEE", val: oee * 100, color: toneVar(oee) },
-    { label: "Perte dispo", val: (1 - a) * 100, color: "var(--chart-2)" },
-    { label: "Perte perf", val: a * (1 - p) * 100, color: "var(--warn)" },
-    { label: "Perte qualité", val: (a * p - oee) * 100, color: "var(--bad)" },
+    { label: "OEE", val: oee * 100, color: toneVar(oee), kind: undefined },
+    { label: "Perte dispo", val: (1 - a) * 100, color: "var(--chart-2)", kind: "dispo" as const },
+    { label: "Perte perf", val: a * (1 - p) * 100, color: "var(--warn)", kind: "perf" as const },
+    { label: "Perte qualité", val: (a * p - oee) * 100, color: "var(--bad)", kind: undefined },
   ];
   return (
     <div>
@@ -143,12 +151,28 @@ function Waterfall({
         )}
       </div>
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        {segs.map((s) => (
-          <span key={s.label} className="inline-flex items-center gap-1.5">
-            <span className="size-2 rounded-full" style={{ background: s.color }} />
-            {s.label} <span className="tabular-nums">{Math.round(s.val)} %</span>
-          </span>
-        ))}
+        {segs.map((s) => {
+          const dot = <span className="size-2 rounded-full" style={{ background: s.color }} />;
+          const txt = (
+            <>
+              {dot} {s.label} <span className="tabular-nums">{Math.round(s.val)} %</span>
+            </>
+          );
+          return s.kind && onPickLoss ? (
+            <button
+              key={s.label}
+              onClick={() => onPickLoss(s.kind!)}
+              title="Voir le Pareto des motifs"
+              className="inline-flex items-center gap-1.5 underline-offset-2 hover:text-foreground hover:underline"
+            >
+              {txt}
+            </button>
+          ) : (
+            <span key={s.label} className="inline-flex items-center gap-1.5">
+              {txt}
+            </span>
+          );
+        })}
       </div>
     </div>
   );
@@ -177,7 +201,13 @@ function Trend({ rows }: { rows: OeeRow[] }) {
 
 // ─── Carte par ligne ─────────────────────────────────────────────────────
 
-function LineCard({ rows }: { rows: OeeRow[] }) {
+function LineCard({
+  rows,
+  onPickLoss,
+}: {
+  rows: OeeRow[];
+  onPickLoss?: (line: string, kind: DowntimeKind) => void;
+}) {
   const r = rows[rows.length - 1];
   const a = dispoOf(r);
   const oee = oeeOf(r);
@@ -203,7 +233,13 @@ function LineCard({ rows }: { rows: OeeRow[] }) {
             <Factor label="Perf" value={r.performance} />
             <Factor label="Qualité" value={r.quality} />
           </div>
-          <Waterfall a={a} p={r.performance} q={r.quality} oee={oee} />
+          <Waterfall
+            a={a}
+            p={r.performance}
+            q={r.quality}
+            oee={oee}
+            onPickLoss={onPickLoss ? (k) => onPickLoss(r.line, k) : undefined}
+          />
         </div>
       </CardContent>
 
@@ -268,14 +304,125 @@ function DataBarCell({
   );
 }
 
+// ─── Pareto des motifs d'arrêt ───────────────────────────────────────────
+
+const KIND_LABEL: Record<DowntimeKind, string> = {
+  dispo: "Disponibilité",
+  perf: "Performance",
+};
+
+function fmtMin(m: number): string {
+  const r = Math.round(m);
+  return r < 60 ? `${r} min` : `${Math.floor(r / 60)} h ${r % 60} min`;
+}
+
+function ParetoSection({
+  downtime,
+  lineOptions,
+  line,
+  kind,
+  setLine,
+  setKind,
+  innerRef,
+}: {
+  downtime: DowntimeRow[];
+  lineOptions: { line: string; label: string }[];
+  line: string;
+  kind: "all" | DowntimeKind;
+  setLine: (l: string) => void;
+  setKind: (k: "all" | DowntimeKind) => void;
+  innerRef: React.RefObject<HTMLDivElement>;
+}) {
+  const agg = useMemo(() => {
+    const filtered = downtime.filter(
+      (d) => (line === "all" || d.line === line) && (kind === "all" || d.kind === kind),
+    );
+    const map = new Map<string, { label: string; color: string; minutes: number }>();
+    for (const d of filtered) {
+      const e = map.get(d.reason_code) ?? { label: d.reason_label, color: d.color, minutes: 0 };
+      e.minutes += d.minutes;
+      map.set(d.reason_code, e);
+    }
+    return [...map.entries()]
+      .map(([code, e]) => ({ code, ...e }))
+      .sort((x, y) => y.minutes - x.minutes);
+  }, [downtime, line, kind]);
+
+  const total = agg.reduce((s, x) => s + x.minutes, 0);
+  const max = agg[0]?.minutes ?? 1;
+  let cum = 0;
+
+  return (
+    <div ref={innerRef}>
+      <Section
+        title="Pareto des pertes (motifs d'arrêt)"
+        action={
+          <div className="flex items-center gap-2">
+            <select value={line} onChange={(e) => setLine(e.target.value)}>
+              <option value="all">Toutes lignes</option>
+              {lineOptions.map((o) => (
+                <option key={o.line} value={o.line}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <div className="range">
+              {(["all", "dispo", "perf"] as const).map((k) => (
+                <button key={k} className={kind === k ? "active" : ""} onClick={() => setKind(k)}>
+                  {k === "all" ? "Tous" : KIND_LABEL[k]}
+                </button>
+              ))}
+            </div>
+          </div>
+        }
+      >
+        {agg.length === 0 ? (
+          <div className="text-sm text-muted-foreground">
+            Aucune perte enregistrée sur la période (ou endpoint downtime indisponible).
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            {agg.map((item) => {
+              cum += item.minutes;
+              const cumPct = total ? Math.round((cum / total) * 100) : 0;
+              return (
+                <div key={item.code} className="flex items-center gap-3 text-sm">
+                  <div className="w-44 shrink-0 truncate" title={item.label}>
+                    {item.label}
+                  </div>
+                  <div className="relative h-5 flex-1 overflow-hidden rounded bg-secondary">
+                    <div
+                      className="h-full rounded"
+                      style={{ width: `${(item.minutes / max) * 100}%`, background: item.color }}
+                    />
+                  </div>
+                  <div className="w-20 shrink-0 text-right tabular-nums">{fmtMin(item.minutes)}</div>
+                  <div className="w-12 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+                    {cumPct} %
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Section>
+    </div>
+  );
+}
+
 // ─── Vue ─────────────────────────────────────────────────────────────────
 
 export function OeeView() {
   const [days, setDays] = useState(7);
   const [rows, setRows] = useState<OeeRow[]>([]);
+  const [downtime, setDowntime] = useState<DowntimeRow[]>([]);
+  const [paretoLine, setParetoLine] = useState<string>("all");
+  const [paretoKind, setParetoKind] = useState<"all" | DowntimeKind>("all");
+  const paretoRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchOee(days).then(setRows).catch(() => setRows([]));
+    fetchDowntime(days).then(setDowntime).catch(() => setDowntime([]));
   }, [days]);
 
   const lines = useMemo(() => {
@@ -289,6 +436,17 @@ export function OeeView() {
       arr.sort((x, y) => x.day.localeCompare(y.day) || x.shift_no - y.shift_no);
     return [...map.values()];
   }, [rows]);
+
+  const lineOptions = useMemo(
+    () => lines.map((rs) => ({ line: rs[0].line, label: rs[0].line_label ?? rs[0].line })),
+    [lines],
+  );
+
+  const onPickLoss = (line: string, kind: DowntimeKind) => {
+    setParetoLine(line);
+    setParetoKind(kind);
+    paretoRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   return (
     <>
@@ -314,9 +472,21 @@ export function OeeView() {
       ) : (
         <div className="grid gap-4 xl:grid-cols-2">
           {lines.map((rs) => (
-            <LineCard key={rs[0].line} rows={rs} />
+            <LineCard key={rs[0].line} rows={rs} onPickLoss={onPickLoss} />
           ))}
         </div>
+      )}
+
+      {lines.length > 0 && (
+        <ParetoSection
+          downtime={downtime}
+          lineOptions={lineOptions}
+          line={paretoLine}
+          kind={paretoKind}
+          setLine={setParetoLine}
+          setKind={setParetoKind}
+          innerRef={paretoRef}
+        />
       )}
 
       {rows.length > 0 && (
