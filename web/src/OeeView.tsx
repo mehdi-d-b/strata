@@ -139,8 +139,8 @@ function Waterfall({
   }
   const segs = [
     { label: "OEE", val: oee * 100, color: toneVar(oee), kind: undefined },
-    { label: "Perte dispo", val: (1 - a) * 100, color: "var(--chart-2)", kind: "dispo" as const },
-    { label: "Perte perf", val: a * (1 - p) * 100, color: "var(--warn)", kind: "perf" as const },
+    { label: "Perte dispo", val: (1 - a) * 100, color: "var(--chart-2)", kind: "downtime" as const },
+    { label: "Perte perf", val: a * (1 - p) * 100, color: "var(--warn)", kind: "performance" as const },
     { label: "Perte qualité", val: (a * p - oee) * 100, color: "var(--bad)", kind: undefined },
   ];
   return (
@@ -307,8 +307,8 @@ function DataBarCell({
 // ─── Pareto des motifs d'arrêt ───────────────────────────────────────────
 
 const KIND_LABEL: Record<DowntimeKind, string> = {
-  dispo: "Disponibilité",
-  perf: "Performance",
+  downtime: "Disponibilité",
+  performance: "Performance",
 };
 
 function fmtMin(m: number): string {
@@ -367,7 +367,7 @@ function ParetoSection({
               ))}
             </select>
             <div className="range">
-              {(["all", "dispo", "perf"] as const).map((k) => (
+              {(["all", "downtime", "performance"] as const).map((k) => (
                 <button key={k} className={kind === k ? "active" : ""} onClick={() => setKind(k)}>
                   {k === "all" ? "Tous" : KIND_LABEL[k]}
                 </button>

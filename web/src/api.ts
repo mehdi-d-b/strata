@@ -421,8 +421,8 @@ export const saveOeeTarget = (t: OeeTarget) =>
 export const deleteOeeTarget = (line: string) =>
   api(`/api/oee-targets/${encodeURIComponent(line)}`, { method: "DELETE" });
 
-/** Type de perte d'un motif d'arrêt : disponibilité ou performance. */
-export type DowntimeKind = "dispo" | "perf";
+/** Type de perte d'un motif d'arrêt (valeurs réelles de l'API). */
+export type DowntimeKind = "downtime" | "performance";
 
 export type DowntimeRow = {
   line: string;
