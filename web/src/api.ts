@@ -484,3 +484,13 @@ export const saveOeeLine = (l: OeeLine) =>
   api<OeeLine>("/api/oee-lines", { method: "POST", body: JSON.stringify(l) });
 export const deleteOeeLine = (line: string) =>
   api(`/api/oee-lines/${encodeURIComponent(line)}`, { method: "DELETE" });
+
+// ─── Assistant (copilote LLM local, lecture seule via la gateway) ──────────
+
+export type ChatMessage = { role: "user" | "assistant"; content: string };
+
+export const assistantChat = (messages: ChatMessage[]) =>
+  api<{ answer: string; steps: number }>("/api/assistant/chat", {
+    method: "POST",
+    body: JSON.stringify({ messages }),
+  });

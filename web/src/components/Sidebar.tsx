@@ -2,6 +2,7 @@ import { useCallback, useState, type ComponentType, type ReactNode } from "react
 import { NavLink } from "react-router-dom";
 import {
   Bell,
+  Bot,
   Cpu,
   Factory,
   Gauge,
@@ -38,6 +39,7 @@ const NAV: NavGroup[] = [
     label: "Supervision",
     items: [
       { to: "/", label: "Accueil", icon: LayoutDashboard, end: true },
+      { to: "/assistant", label: "Assistant", icon: Bot },
       { to: "/explorer", label: "Explorer", icon: LineChart },
       { to: "/dashboards", label: "Dashboards", icon: LayoutGrid },
       { to: "/alarms", label: "Alarmes", icon: Bell },
