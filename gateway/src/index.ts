@@ -32,7 +32,7 @@ import {
 } from "./auth.js";
 import { deployDevice, undeployDevice } from "./plc4x.js";
 import { AlarmEngine } from "./alarms.js";
-import { runAssistant, type ChatMessage } from "./assistant.js";
+import { runAssistant, getPending, consumePending, type ChatMessage } from "./assistant.js";
 
 const KAFKA_BROKERS = (process.env.KAFKA_BROKERS ?? "redpanda:9092").split(",");
 const PG_DSN =
@@ -847,6 +847,51 @@ app.post("/api/assistant/chat", { preHandler: requireAuth }, async (req, reply) 
   } catch (e) {
     return reply.code(502).send({ error: `assistant indisponible (profil ai démarré ?): ${(e as Error).message}` });
   }
+});
+
+// Confirmation d'une action proposée par l'assistant (Part B : propose→confirme→
+// exécute). On RE-vérifie le droit write + on audite ; le LLM n'écrit jamais seul.
+app.post("/api/assistant/confirm", { preHandler: requireAuth }, async (req, reply) => {
+  const { id } = req.body as { id?: string };
+  if (!id) return reply.code(400).send({ error: "id requis" });
+  const p = getPending(id);
+  if (!p) return reply.code(404).send({ error: "action expirée ou introuvable" });
+  if (p.username !== req.user!.username)
+    return reply.code(403).send({ error: "action proposée à un autre utilisateur" });
+  try {
+    if (p.tool === "set_command") {
+      const tag = String(p.args.tag ?? "");
+      const value = Number(p.args.value);
+      if (!tag || Number.isNaN(value)) return reply.code(400).send({ error: "consigne invalide" });
+      if (!can(req.user, "write", tag))
+        return reply.code(403).send({ error: `pas le droit d'écrire sur ${tag}` });
+      await publishCommand(tag, value, `assistant:${req.user!.username}`);
+      await audit(req.user!.username, "assistant.command", tag, { value });
+      consumePending(id);
+      return { ok: true, result: `Consigne ${value} envoyée sur ${tag}.` };
+    }
+    if (p.tool === "ack_alarm") {
+      const alarmId = String(p.args.alarm_id ?? "");
+      const { rows } = await pool.query(
+        `UPDATE alarms SET acked=true, acked_by=$2, acked_at=now() WHERE id=$1 RETURNING tag`,
+        [alarmId, req.user!.username],
+      );
+      if (rows.length === 0) return reply.code(404).send({ error: "alarme introuvable" });
+      await audit(req.user!.username, "assistant.alarm.ack", rows[0].tag);
+      consumePending(id);
+      return { ok: true, result: `Alarme ${alarmId} acquittée.` };
+    }
+    return reply.code(400).send({ error: `action non supportée: ${p.tool}` });
+  } catch (e) {
+    return reply.code(502).send({ error: (e as Error).message });
+  }
+});
+
+// Annulation d'une action proposée (l'humain refuse).
+app.post("/api/assistant/cancel", { preHandler: requireAuth }, async (req) => {
+  const { id } = req.body as { id?: string };
+  if (id) consumePending(id);
+  return { ok: true };
 });
 
 // Objectifs OEE par ligne (cible OEE + objectif de pièces/shift). Admin.

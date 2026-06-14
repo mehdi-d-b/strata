@@ -6,6 +6,7 @@
  * c'est CE code qui exécute des tools de LECTURE via la base (jamais d'accès direct
  * pour le modèle). Les tools tournent avec le contexte de l'utilisateur connecté.
  */
+import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { can, type AuthUser } from "./auth.js";
 
@@ -92,7 +93,80 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "set_command",
+      description:
+        "PROPOSE d'écrire une consigne (setpoint) sur un tag. ACTION soumise à CONFIRMATION humaine — n'exécute rien directement.",
+      parameters: {
+        type: "object",
+        properties: {
+          tag: { type: "string", description: "tag cible (ex 'brasserie.ipa.fermenteur.temp_consigne')" },
+          value: { type: "number" },
+        },
+        required: ["tag", "value"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "ack_alarm",
+      description: "PROPOSE d'acquitter une alarme (par son id). ACTION soumise à CONFIRMATION humaine.",
+      parameters: {
+        type: "object",
+        properties: { alarm_id: { type: "string" } },
+        required: ["alarm_id"],
+      },
+    },
+  },
 ];
+
+// Tools d'écriture : la boucle ne les EXÉCUTE pas — elle propose une action que
+// l'humain confirme (cf. /api/assistant/confirm). Un mauvais choix du modèle est
+// donc inoffensif (l'humain annule).
+export const WRITE_TOOLS = new Set(["set_command", "ack_alarm"]);
+
+export type PendingAction = { id: string; tool: string; args: Args; summary: string };
+export type PendingEntry = { username: string; tool: string; args: Args; createdAt: number };
+
+const PENDING = new Map<string, PendingEntry>();
+const PENDING_TTL_MS = 10 * 60 * 1000;
+
+function summarize(tool: string, args: Args): string {
+  switch (tool) {
+    case "set_command":
+      return `écrire la consigne ${args.value} sur le tag « ${args.tag} »`;
+    case "ack_alarm":
+      return `acquitter l'alarme ${args.alarm_id}`;
+    default:
+      return `${tool}(${JSON.stringify(args)})`;
+  }
+}
+
+function addPending(username: string, tool: string, args: Args): PendingAction {
+  const now = Date.now();
+  for (const [k, v] of PENDING) if (now - v.createdAt > PENDING_TTL_MS) PENDING.delete(k);
+  const id = randomUUID();
+  PENDING.set(id, { username, tool, args, createdAt: now });
+  return { id, tool, args, summary: summarize(tool, args) };
+}
+
+/** Récupère une action en attente non expirée (pour /confirm). */
+export function getPending(id: string): PendingEntry | undefined {
+  const e = PENDING.get(id);
+  if (!e) return undefined;
+  if (Date.now() - e.createdAt > PENDING_TTL_MS) {
+    PENDING.delete(id);
+    return undefined;
+  }
+  return e;
+}
+
+export function consumePending(id: string): void {
+  PENDING.delete(id);
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Args = Record<string, any>;
@@ -207,14 +281,17 @@ const SYSTEM_PROMPT =
   "tools — n'invente jamais de valeurs. Si une donnée n'est pas disponible via un tool, dis-le. " +
   "Pour une question non couverte par get_oee/get_production/list_alarms/get_history, utilise " +
   "describe_schema (pour voir les tables/colonnes) puis query_readonly avec un SELECT PostgreSQL " +
-  "en lecture seule (un seul SELECT, sans point-virgule).";
+  "en lecture seule (un seul SELECT, sans point-virgule). " +
+  "Pour AGIR (écrire une consigne, acquitter une alarme), utilise set_command / ack_alarm : " +
+  "ce sont des PROPOSITIONS soumises à confirmation humaine — tu n'exécutes jamais directement.";
 
 /** Boucle d'agent : appelle le LLM, exécute les tools demandés, jusqu'à la réponse. */
 export async function runAssistant(
   pool: pg.Pool,
   user: AuthUser | null,
   history: ChatMessage[],
-): Promise<{ answer: string; steps: number }> {
+): Promise<{ answer?: string; pendingAction?: PendingAction; steps: number }> {
+  const username = user?.username ?? "anonymous";
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const messages: any[] = [{ role: "system", content: SYSTEM_PROMPT }, ...history];
 
@@ -242,6 +319,20 @@ export async function runAssistant(
     if (!msg) throw new Error("réponse LLM vide");
 
     if (msg.tool_calls?.length) {
+      // Action d'écriture demandée ? On INTERCEPTE la 1ère : aucune exécution, on
+      // renvoie une proposition à CONFIRMER par l'humain (cf. /api/assistant/confirm).
+      const writeCall = msg.tool_calls.find((tc: { function?: { name?: string } }) =>
+        WRITE_TOOLS.has(tc.function?.name ?? ""),
+      );
+      if (writeCall) {
+        let wargs: Args = {};
+        try {
+          wargs = JSON.parse(writeCall.function?.arguments || "{}");
+        } catch {
+          /* arguments non-JSON : objet vide */
+        }
+        return { pendingAction: addPending(username, writeCall.function?.name ?? "", wargs), steps: step };
+      }
       messages.push(msg);
       for (const tc of msg.tool_calls) {
         let args: Args = {};

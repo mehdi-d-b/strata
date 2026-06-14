@@ -249,9 +249,13 @@ rétention sans toucher au SQL »).
       timeout + LIMIT). **Sandbox validé** (lecture données OK, auth refusée, écriture refusée).
       ⚠️ **Bridé par le modèle local** : qwen2.5:3b sur CPU n'arrive pas à piloter le flux
       describe→query (thrash). **Utilisable seulement avec un vrai modèle/GPU.**
-- [ ] **v2 — suite** : **action encadrée** (write via gateway + confirmation humaine), **streaming**
-      (UX), **vrai modèle/GPU** (prérequis de Part A), **RAG** local (pgvector + embeddings) si
-      besoin doc métier.
+- [x] **v2 — Part B : action encadrée** (propose → confirme → exécute) : write tools
+      (`set_command`, `ack_alarm`) **interceptés** par la boucle → proposition à **confirmation
+      humaine** (`pending_action`) ; `POST /api/assistant/confirm` re-vérifie `can(write)`, exécute,
+      audite, **consomme** (one-shot). **Validé en live** (le 3B propose, l'humain confirme, l'ack
+      s'exécute). Sûr même avec un petit modèle (l'humain est le garde-fou).
+- [ ] **v2 — suite** : **streaming** (UX), **vrai modèle/GPU** (prérequis de Part A / diagnostic
+      multi-étapes), **RAG** local (pgvector + embeddings) si besoin doc métier.
 
 ### Documentation utilisateur / aide en ligne (in-app)
 But : qu'un **utilisateur non-tech** découvre **toutes** les features et **comment les utiliser**.

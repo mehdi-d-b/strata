@@ -65,6 +65,18 @@ RisingWave/Timescale), on ajoute deux tools — et **le LLM découvre le schéma
   `get_oee` et répondu le bon OEE (sans halluciner), ~49 s sur CPU. UI chat = côté front.
 - **v2 (quand modèle capable + vrai GPU)** : `describe_schema` + `query_readonly` (bac à sable
   read-only), puis tools d'**action encadrée** (write via gateway + confirmation humaine).
+
+**État Part B — FAIT & validé (sûr même sur petit modèle)** : motif **propose → confirme →
+exécute**. Les write tools (`set_command`, `ack_alarm`) sont **interceptés** par la boucle (jamais
+exécutés par le modèle) → l'API renvoie une `pending_action`. Contrat front :
+- `POST /api/assistant/chat` → soit `{ answer }`, soit `{ pendingAction: { id, tool, args, summary } }`.
+- si `pendingAction` → le front montre une **carte de confirmation** (« `summary` ? [Confirmer] [Annuler] »).
+- **Confirmer** → `POST /api/assistant/confirm { id }` → re-vérifie `can(write)`, exécute, **audite**,
+  consomme l'action (one-shot) → `{ ok, result }`.
+- **Annuler** → `POST /api/assistant/cancel { id }`.
+
+Sécurité : zéro écriture autonome, RBAC re-vérifié à l'exécution, audit, action à usage unique
+(TTL 10 min). Un mauvais choix du modèle = une proposition que l'humain rejette → inoffensif.
 - **Matériel** : accélération GPU **AMD/ROCm peu fiable** hors cartes récentes (et nulle en WSL2)
   → souvent **CPU**. OK pour valider l'archi + Q&A simple (modèle 3B), pas pour la vitesse ni le
   text-to-SQL. Le vrai assistant = vraie machine/GPU + modèle plus gros.
