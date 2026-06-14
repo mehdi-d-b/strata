@@ -48,6 +48,15 @@ RisingWave/Timescale), on ajoute deux tools — et **le LLM découvre le schéma
 
 ⚠️ Écrire un SQL correct sur un schéma découvert demande un **modèle costaud** → c'est de la **v2**.
 
+**État Part A — infra FAITE & sandbox validé (mais bridé par le petit modèle)** :
+- `describe_schema` : liste les tables de données + colonnes (via les grants de `strata_ro`).
+- `query_readonly(sql)` : exécuté via **rôle Postgres `strata_ro`** (SELECT seulement, jamais
+  l'auth) + **transaction READ ONLY** + `statement_timeout` + wrap `LIMIT 500`. Défense en
+  profondeur, testée : lecture données OK / table `users` refusée / `INSERT` refusé.
+- ⚠️ **qwen2.5:3b sur CPU n'y arrive pas** (il thrashe sur le flux describe→query, contexte
+  trop court même avec `num_ctx` relevé). **Part A n'est exploitable qu'avec un vrai modèle/GPU**
+  (14B+). L'infra, elle, est prête et sûre.
+
 ### Dosage v1 / v2 (et matériel)
 
 - **v1 — FAIT (validé en live)** : profil Docker `ai` (Ollama + `qwen2.5:3b`), boucle d'agent

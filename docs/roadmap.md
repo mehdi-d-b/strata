@@ -243,9 +243,15 @@ rétention sans toucher au SQL »).
       Le LLM ne touche jamais la base (il propose des tool-calls, la gateway exécute). **Validé en
       live** : qwen2.5:3b a appelé `get_oee` et répondu le bon chiffre (~49 s CPU). UI chat = front.
       *Pas de MCP* (inutile en in-app) ni LangChain (boucle directe).
-- [ ] **v2** : `describe_schema` + `query_readonly` (bac à sable read-only pour les questions
-      imprévues), **action encadrée** (write via gateway + confirmation), vrai modèle/GPU.
-      **RAG** = optionnel/ultérieur (docs métier ; pgvector + embeddings locaux).
+- [x] **v2 — Part A : questions imprévues (text-to-SQL en bac à sable)** : tools
+      `describe_schema` (catalogue des tables de données via les grants) + `query_readonly`
+      (SELECT exécuté via rôle Postgres **read-only** `strata_ro` + transaction READ ONLY +
+      timeout + LIMIT). **Sandbox validé** (lecture données OK, auth refusée, écriture refusée).
+      ⚠️ **Bridé par le modèle local** : qwen2.5:3b sur CPU n'arrive pas à piloter le flux
+      describe→query (thrash). **Utilisable seulement avec un vrai modèle/GPU.**
+- [ ] **v2 — suite** : **action encadrée** (write via gateway + confirmation humaine), **streaming**
+      (UX), **vrai modèle/GPU** (prérequis de Part A), **RAG** local (pgvector + embeddings) si
+      besoin doc métier.
 
 ### Documentation utilisateur / aide en ligne (in-app)
 But : qu'un **utilisateur non-tech** découvre **toutes** les features et **comment les utiliser**.
