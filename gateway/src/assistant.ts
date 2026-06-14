@@ -292,8 +292,17 @@ export async function runAssistant(
   history: ChatMessage[],
 ): Promise<{ answer?: string; pendingAction?: PendingAction; steps: number }> {
   const username = user?.username ?? "anonymous";
+  // Nettoie l'historique reçu du front (persistance) : on ne garde que des tours
+  // user/assistant à contenu non vide, on borne la longueur. Évite qu'un message
+  // mal formé (ex. contenu vide d'une ancienne proposition) ne fasse planter Ollama.
+  const clean = history
+    .filter(
+      (m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim() !== "",
+    )
+    .slice(-20)
+    .map((m) => ({ role: m.role, content: m.content }));
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const messages: any[] = [{ role: "system", content: SYSTEM_PROMPT }, ...history];
+  const messages: any[] = [{ role: "system", content: SYSTEM_PROMPT }, ...clean];
 
   for (let step = 0; step < MAX_STEPS; step++) {
     const resp = await fetch(`${OLLAMA_URL}/v1/chat/completions`, {
@@ -331,7 +340,14 @@ export async function runAssistant(
         } catch {
           /* arguments non-JSON : objet vide */
         }
-        return { pendingAction: addPending(username, writeCall.function?.name ?? "", wargs), steps: step };
+        const pendingAction = addPending(username, writeCall.function?.name ?? "", wargs);
+        // On renvoie AUSSI un texte : un front qui ne gère pas encore pendingAction
+        // affiche au moins la proposition (au lieu d'un message vide).
+        return {
+          answer: `Je propose d'${pendingAction.summary} — à confirmer pour exécuter.`,
+          pendingAction,
+          steps: step,
+        };
       }
       messages.push(msg);
       for (const tc of msg.tool_calls) {
@@ -351,7 +367,7 @@ export async function runAssistant(
       }
       continue;
     }
-    return { answer: msg.content ?? "", steps: step };
+    return { answer: msg.content?.trim() || "(je n'ai pas su formuler de réponse — peux-tu reformuler ?)", steps: step };
   }
   return { answer: "(j'ai atteint la limite d'étapes ; reformule peut-être ta question)", steps: MAX_STEPS };
 }
