@@ -75,6 +75,21 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "get_batch_context",
+      description:
+        "Dossier d'un batch (brassage) pour enquêter sur sa qualité : verdict QC, déviations de chaque cuve VS sa bande nominale, alarmes survenues, changements de consigne, sanitation (CIP). Réf = un id de batch (ex 'ipa-1781…') ou une recette ('ipa', 'blonde', 'jalapeno', ou 'dernier ipa').",
+      parameters: {
+        type: "object",
+        properties: {
+          batch_ref: { type: "string", description: "id de batch, ou recette (= dernier batch de cette recette)" },
+        },
+        required: ["batch_ref"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "describe_schema",
       description:
         "Liste les tables/vues de données interrogeables et leurs colonnes. À appeler AVANT query_readonly pour savoir quoi interroger, quand les autres tools ne suffisent pas.",
@@ -252,6 +267,152 @@ async function execTool(pool: pg.Pool, user: AuthUser | null, name: string, args
       // définie comme tag dérivé (cf. docs/llm-integration.md), pas calculée naïvement ici.
       return JSON.stringify({ tag, minutes, current, points });
     }
+    case "get_batch_context": {
+      const ref = String(args.batch_ref ?? "").trim();
+      if (!ref) return JSON.stringify({ error: "batch_ref requis" });
+      const round1 = (v: unknown) => (v == null ? null : Math.round(Number(v) * 10) / 10);
+      const cols =
+        "id, recipe, line, started_at, ended_at, status, qc_verdict, defaut_type, rebut_pct";
+      // Résolution : id exact, sinon dernier batch d'une recette (gère "dernier ipa").
+      let b = (await pool.query(`SELECT ${cols} FROM batches WHERE id = $1`, [ref])).rows[0];
+      if (!b) {
+        const recs = (await pool.query("SELECT DISTINCT recipe FROM batches")).rows.map(
+          (r) => r.recipe as string,
+        );
+        const hit = recs.find((rc) => ref.toLowerCase().includes(rc.toLowerCase()));
+        if (hit)
+          b = (
+            await pool.query(
+              `SELECT ${cols} FROM batches WHERE recipe = $1 ORDER BY started_at DESC LIMIT 1`,
+              [hit],
+            )
+          ).rows[0];
+        if (!b) return JSON.stringify({ error: `batch introuvable: ${ref}`, recettes_connues: recs });
+      }
+      const line = b.line as string;
+      // RBAC : on exige le droit de lire les données de procédé de la ligne.
+      if (!can(user, "read", `${line}.fermenteur.temperature`))
+        return JSON.stringify({ error: `pas le droit de lire la ligne ${line}` });
+      const start = b.started_at as Date;
+      const end = (b.ended_at as Date) ?? new Date(); // batch en cours -> jusqu'à maintenant
+
+      // Déviations par cuve VS bande nominale [temp_cible ± temp_tol]. Cuves découvertes
+      // via les tags *.temperature de la ligne (générique, pas de noms en dur).
+      const vessels = (
+        await pool.query(
+          `SELECT DISTINCT tag FROM mesures WHERE tag LIKE $1 AND ts BETWEEN $2 AND $3`,
+          [`${line}.%.temperature`, start, end],
+        )
+      ).rows;
+      const deviations: Record<string, unknown>[] = [];
+      for (const vr of vessels) {
+        const tTag = vr.tag as string; // ex brasserie.ipa.fermenteur.temperature
+        const base = tTag.slice(0, -".temperature".length);
+        const vessel = base.slice(line.length + 1);
+        const band = (
+          await pool.query(
+            `SELECT (SELECT avg(value) FROM mesures WHERE tag=$1 AND ts BETWEEN $3 AND $4) AS cible,
+                    (SELECT avg(value) FROM mesures WHERE tag=$2 AND ts BETWEEN $3 AND $4) AS tol`,
+            [`${base}.temp_cible`, `${base}.temp_tol`, start, end],
+          )
+        ).rows[0];
+        const cible = band?.cible == null ? null : Number(band.cible);
+        const tol = band?.tol == null ? null : Number(band.tol);
+        if (cible == null || tol == null) {
+          // Bande inconnue (ex. ancien batch sans temp_tol) : on rapporte l'observé brut.
+          const st = (
+            await pool.query(
+              `SELECT min(value) AS mn, max(value) AS mx, avg(value) AS av FROM mesures
+               WHERE tag=$1 AND ts BETWEEN $2 AND $3`,
+              [tTag, start, end],
+            )
+          ).rows[0];
+          deviations.push({
+            vessel, nominal: null,
+            observed: { min: round1(st.mn), max: round1(st.mx), avg: round1(st.av) },
+            max_excess: null, pct_out_of_band: null,
+          });
+          continue;
+        }
+        // On EXCLUT le transitoire de chauffe : on ne mesure la déviation qu'à partir
+        // du moment où la cuve est STABILISÉE PRÈS de sa cible (dans la demi-bande), pas
+        // au simple bord de la bande — sinon le bruit, juste à l'entrée de bande pendant
+        // la montée, génère un faux excès résiduel. Même logique que le « settled » du
+        // cerveau (cf. simulator/factory/brain.py).
+        const reg = (
+          await pool.query(
+            `SELECT min(ts) AS t0 FROM mesures
+             WHERE tag=$1 AND ts BETWEEN $2 AND $3 AND value BETWEEN $4 AND $5`,
+            [tTag, start, end, cible - 0.5 * tol, cible + 0.5 * tol],
+          )
+        ).rows[0];
+        const t0 = reg?.t0 as Date | null; // null = cuve jamais entrée dans sa bande
+        const st = (
+          await pool.query(
+            `SELECT min(value) AS mn, max(value) AS mx, avg(value) AS av,
+                    count(*) FILTER (WHERE value > $4 OR value < $5) AS nout, count(*) AS n,
+                    max(GREATEST(value-$4, $5-value, 0)) AS excess
+             FROM mesures WHERE tag=$1 AND ts BETWEEN $2 AND $3`,
+            [tTag, t0 ?? start, end, cible + tol, cible - tol],
+          )
+        ).rows[0];
+        const n = Number(st.n) || 1;
+        const pctOut = t0 == null ? null : Math.round((100 * Number(st.nout)) / n);
+        // Booléen explicite (le modèle n'a pas à comparer des nombres) : hors bande
+        // seulement si la déviation est SIGNIFICATIVE (>5% du temps), pas un effleurement
+        // du seuil au bruit près.
+        const outOfBand = t0 == null ? true : (pctOut ?? 0) >= 5;
+        deviations.push({
+          vessel,
+          out_of_band: outOfBand,
+          nominal: [round1(cible - tol), round1(cible + tol)],
+          observed: { min: round1(st.mn), max: round1(st.mx), avg: round1(st.av) },
+          max_excess: t0 == null ? null : st.excess == null ? 0 : round1(st.excess),
+          pct_out_of_band: pctOut,
+          never_reached_target: t0 == null ? true : undefined,
+        });
+      }
+      const cuvesHorsBande = deviations.filter((d) => d.out_of_band).map((d) => d.vessel);
+
+      const alarms = (
+        await pool.query(
+          `SELECT tag, severity, message, raised_at FROM alarms
+           WHERE raised_at BETWEEN $2 AND $3 AND tag LIKE $1 ORDER BY raised_at LIMIT 50`,
+          [`${line}.%`, start, end],
+        )
+      ).rows;
+      const setpoints = (
+        await pool.query(
+          `SELECT tag, min(value) AS from_v, max(value) AS to_v FROM mesures
+           WHERE tag LIKE $1 AND ts BETWEEN $2 AND $3 GROUP BY tag HAVING min(value) <> max(value)`,
+          [`${line}.%.temp_cible`, start, end],
+        )
+      ).rows.map((r) => ({ tag: r.tag, from: round1(r.from_v), to: round1(r.to_v) }));
+      const cipRow = (
+        await pool.query(`SELECT min(value) AS m FROM mesures WHERE tag=$1 AND ts BETWEEN $2 AND $3`, [
+          `${line}.cip_ok`,
+          start,
+          end,
+        ])
+      ).rows[0];
+      const cipOk = cipRow?.m == null ? null : Number(cipRow.m) >= 1;
+
+      return JSON.stringify({
+        // Conclusion d'abord : le batch est-il conforme ? (qc_verdict='ok' => oui).
+        conforme: b.qc_verdict === "ok",
+        cuves_hors_bande: cuvesHorsBande, // [] = aucune déviation thermique
+        batch: {
+          id: b.id, recipe: b.recipe, line, started_at: b.started_at, ended_at: b.ended_at,
+          status: b.status, qc_verdict: b.qc_verdict, defaut_type: b.defaut_type, rebut_pct: b.rebut_pct,
+        },
+        cip_ok: cipOk,
+        deviations,
+        alarms_during: alarms.map((a) => ({
+          tag: a.tag, severity: a.severity, message: a.message, at: a.raised_at,
+        })),
+        setpoint_changes: setpoints,
+      });
+    }
     case "describe_schema": {
       // N'expose que ce que strata_ro peut lire (les grants = source de vérité).
       const { rows } = await pool.query(
@@ -296,12 +457,20 @@ async function execTool(pool: pg.Pool, user: AuthUser | null, name: string, args
 
 const SYSTEM_PROMPT =
   "Tu es l'assistant de Strata, une plateforme de supervision de données industrielles " +
-  "(démo : une micro-brasserie avec 2 lignes, blonde et ipa). Réponds en français, de façon " +
+  "(démo : une micro-brasserie avec 3 lignes : blonde, ipa et jalapeno). Réponds en français, de façon " +
   "concise et PRÉCISE : réponds exactement à la question posée, sans analyse, résumé ni " +
   "recommandations non demandés. Si on demande une seule chose (la dernière alarme, un chiffre…), " +
   "donne juste ça. Pour toute donnée chiffrée (OEE, production, alarmes, mesures), utilise TOUJOURS les " +
   "tools — n'invente jamais de valeurs. Si une donnée n'est pas disponible via un tool, dis-le. " +
-  "Pour une question non couverte par get_oee/get_production/list_alarms/get_history, utilise " +
+  "Pour DIAGNOSTIQUER un batch (pourquoi un brassage est raté / hors spec, qu'est-ce qui a dévié), " +
+  "utilise get_batch_context. COMMENCE par le champ `conforme` : s'il est vrai (verdict 'ok'), le " +
+  "batch est CONFORME — dis-le clairement et N'INVENTE PAS de défaut, même si la question suppose un " +
+  "problème. Si non conforme, le DÉFAUT est donné par `defaut_type` (c'est LE résultat QC) : énonce-le, " +
+  "puis EXPLIQUE-le avec `cip_ok` (faux => contamination/sanitation) et `cuves_hors_bande` (cuves en " +
+  "déviation thermique). Une cuve n'est hors bande QUE si elle figure dans `cuves_hors_bande` (liste vide " +
+  "= aucune déviation thermique, n'accuse alors AUCUNE cuve) ; ne déduis jamais une déviation toi-même en " +
+  "comparant des nombres. " +
+  "Pour une question non couverte par get_oee/get_production/list_alarms/get_history/get_batch_context, utilise " +
   "describe_schema (pour voir les tables/colonnes) puis query_readonly avec un SELECT PostgreSQL " +
   "en lecture seule (un seul SELECT, sans point-virgule). " +
   "Pour AGIR (écrire une consigne, acquitter une alarme), utilise set_command / ack_alarm : " +
