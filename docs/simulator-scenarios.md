@@ -88,24 +88,52 @@ CREATE TABLE batches (
 
 ### 3. Codes de défaut (verdict)
 
+Un verdict = **résultat QC** (le batch est-il conforme, et quel défaut), **pas la forme de
+la cause**. Conséquence directe : une **dérive lente** (S5) et un **emballement rapide** (S1)
+donnent le **même verdict** `fermentation_hors_spec` — ce qui les distingue, c'est la
+*timeline* que l'assistant analysera. Il n'y a donc pas de verdict « dérive non rattrapée ».
+
 | code `defaut_type`       | sens                                          | scénario |
 |--------------------------|-----------------------------------------------|----------|
 | `null` / `ok`            | batch conforme                                | —        |
-| `fermentation_hors_spec` | fermentation trop chaude → atténuation/densité finale hors cible | S1 |
+| `fermentation_hors_spec` | fermentation trop chaude → atténuation/densité finale hors cible | S1, S5 |
 | `rendement_faible`       | empâtage trop chaud → conversion d'amidon incomplète, moût trouble | S2 |
 | `contamination`          | sanitation insuffisante (CIP écourté)         | S3       |
 | `volume_insuffisant`     | qualité OK mais objectif de volume manqué     | S4       |
-| `derive_non_rattrapee`   | dérive lente détectée trop tard               | S5       |
+
+> Codes numériques portés par le tag `batch.qc_verdict` : 0 ok · 1 fermentation_hors_spec ·
+> 2 rendement_faible · 3 contamination · 4 volume_insuffisant. La gateway les mappe en texte.
+
+### 3 bis. D'où vient le verdict : simulateur (oracle) vs usine réelle
+
+**Point d'architecture important.** Ici, c'est le **simulateur qui calcule** le verdict
+(`brain._decide_verdict`, depuis la sévérité intégrée des déviations) — parce que le simulateur
+*est* l'oracle : il connaît la vraie physique, et on a besoin d'une **vérité terrain** pour
+tester l'assistant. **Ce n'est pas ainsi qu'une vraie usine fonctionne.**
+
+| | D'où ça vient (usine réelle) | Général / spécifique |
+|---|---|---|
+| **Verdict** (conforme ? quel défaut ?) | **QC / labo / opérateur** (analyse ou jugement), saisi via UI ou remonté d'un **LIMS/MES** | **donnée d'entrée ingérée**, pas un calcul |
+| **Déviations process** (temp hors bande, sévérité ∫) | **calculées** depuis les signaux | **général**, réutilisable |
+
+Le verdict est une **vérité externe ingérée** ; les déviations servent à l'**expliquer** (boulot
+de l'assistant : corréler). Sur une **nouvelle usine** : on ne porte pas `_decide_verdict` (interne
+au sim). On garde la table `batches`, le `BatchTracker` et l'analyse de déviation (génériques) ;
+on remplace la *source du verdict* par une **saisie QC** (opérateur/LIMS) dans `batches`
+(`qc_verdict` / `defaut_type` / `qc_notes`), et les frontières de batch viennent du MES/PLC.
 
 ### 4. Petits ajouts de modélisation
 
-- **Axe sanitation** : variable `brasserie.<ligne>.cip_ok` (1 = nettoyage conforme avant batch).
-  Indispensable pour S3 : il donne une cause **non-thermique**, donc *discriminante*.
-- **Action « dérive progressive »** dans `scenario.py` : rampe `+δ °C/min` sur N minutes, au lieu
-  du saut instantané actuel (`nudge_temp`). Pour S5.
-- **Recettes enrichies** (optionnel, valeur : bandes nominales **non arbitraires**) : phases avec
-  consigne + tolérance par phase, et une 3ᵉ recette de variété (ex. `jalapeno`). Les bandes
-  nominales deviennent `consigne_recette ± tolérance`, exploitables par `get_batch_context`.
+- **Axe sanitation** ✅ : variable `brasserie.<ligne>.cip_ok` (1 = nettoyage conforme avant batch).
+  Donne à S3 une cause **non-thermique**, donc *discriminante*. Effet : `upstream_quality` dégradée
+  (facteur contamination) **sans** déviation de température → rebut qui monte, sévérité thermique nulle.
+- **Dérive lente** ✅ : `drift_rate` sur la cuve décale l'**équilibre** thermique (pas une force que
+  la régulation annule) → la vraie température part doucement hors plage. Pour S5.
+- **Modèle de détection** ✅ : verdict par **sévérité intégrée** `∫ max(0, seuil − qualité) dt`
+  (capte court-mais-sévère *et* lent), et **bruit de mesure** (sur le tag publié) au lieu d'un bruit
+  qui dérive l'état — une cuve nominale a donc une sévérité exactement nulle.
+- **Recettes enrichies** (étape 5, à venir) : phases avec consigne + tolérance par phase, et une 3ᵉ
+  recette de variété (ex. `jalapeno`). Les bandes nominales deviennent `consigne ± tolérance`.
 
 ---
 
@@ -148,25 +176,30 @@ one-shot fixe actuel). Format : déclencheur → propagation → symptômes lisi
   problème de **débit / disponibilité**. Teste « vais-je atteindre mes 2500 pièces ? » et l'OEE.
 - **Verdict** : `volume_insuffisant`. *(cause existante)*
 
-### S5 — Dérive lente de capteur (détection tardive) · *réalisme « cause à effet, pas random »*
-- **Déclencheur** : dérive **progressive** (+0,3 °C/min sur ~15 min) au lieu d'un saut.
+### S5 — Dérive lente (détection tardive) · *réalisme « cause à effet, pas random »*
+- **Déclencheur** : dérive **progressive** de l'équilibre du fermenteur (+1,5 °C/min) au lieu d'un saut.
 - **Propagation** : la qualité se dégrade lentement ; `defaut_thermique` ne se lève que tard
-  (seuil 2× tolérance) → le batch est déjà à moitié dégradé quand l'alarme sonne.
+  (seuil 2× tolérance) → le batch est déjà bien dégradé quand l'alarme sonne.
 - **Pourquoi** : rend la timeline *intéressante* (« ça a commencé bien avant l'alarme ») et
   justifie des dérivés type *écart consigne/mesure cumulé* plutôt qu'un seuil binaire.
-- **Verdict** : `derive_non_rattrapee`. *(demande l'action « rampe »)*
+- **Verdict** : `fermentation_hors_spec` (même résultat QC que S1 ; c'est la **timeline** qui
+  diffère, pas le verdict). *(action `drift_temp`)*
 
 ---
 
 ## Couverture (classes de RCA)
 
-| Scénario | Classe testée                          | Cause existe ? |
-|----------|----------------------------------------|----------------|
-| S1       | RCA qualité process                    | ✅ |
-| S2       | RCA qualité, localisation (autre cuve) | ✅ |
-| S3       | RCA discriminante (axe non-thermique)  | ➕ `cip_ok` |
-| S4       | machine / débit / projection de shift  | ✅ |
-| S5       | réalisme temporel (dérive lente)       | ➕ action rampe |
+| Scénario | Classe testée                          | État |
+|----------|----------------------------------------|------|
+| S1       | RCA qualité process                    | ✅ implémenté |
+| S2       | RCA qualité, localisation (autre cuve) | ✅ implémenté |
+| S3       | RCA discriminante (axe non-thermique)  | ✅ implémenté (`cip_ok`) |
+| S4       | machine / débit / projection de shift  | ✅ implémenté |
+| S5       | réalisme temporel (dérive lente)       | ✅ implémenté (`drift_temp`) |
+
+Tous les scénarios tournent en **rotation** (`CYCLE_PLANS`) — un défaut net par batch — ou
+**forcés** via `SCENARIO_FORCE=<nom> SCENARIO_LINE=<ligne>`. Validés hors-ligne : 240 cycles /
+40 seeds, 0 mauvais verdict, sévérité d'une cuve nominale = 0.
 
 ## Récap des ajouts requis
 
@@ -182,11 +215,11 @@ one-shot fixe actuel). Format : déclencheur → propagation → symptômes lisi
 
 ## Ordre conseillé
 
-1. **Cerveau** : batch discret + verdict/`defaut_type` + tags batch.
-2. **Gateway** : table `batches` + écriture à la clôture.
-3. **Scénarios** : rendre les scénarios déclenchables/reproductibles + S1/S2/S4 (causes existantes).
-4. **Discrimination & réalisme** : `cip_ok` (S3) + action rampe (S5).
-5. **Variété** : recettes enrichies (phases, jalapeño) — quand le reste tourne.
+1. ✅ **Cerveau** : batch discret + verdict/`defaut_type` + tags batch.
+2. ✅ **Gateway** : table `batches` + écriture à la clôture + `GET /api/batches`.
+3. ✅ **Scénarios** : rotation déclenchable/reproductible + S1/S2/S4.
+4. ✅ **Discrimination & réalisme** : `cip_ok` (S3) + dérive lente (S5) + sévérité intégrée.
+5. **Variété** : recettes enrichies (phases, jalapeño) — quand le reste tourne. ⟵ *reste à faire*
 
 > Suite logique côté assistant (hors de ce doc) : `get_batch_context` → puis le workflow RCA
 > routé. Le réglage fin du raisonnement attendra un GPU + un modèle plus gros ; toute la

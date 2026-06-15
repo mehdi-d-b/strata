@@ -16,7 +16,6 @@ const VERDICT: Record<number, string> = {
   2: "rendement_faible",
   3: "contamination",
   4: "volume_insuffisant",
-  5: "derive_non_rattrapee",
 };
 
 type LineState = {
