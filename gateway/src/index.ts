@@ -32,6 +32,7 @@ import {
 } from "./auth.js";
 import { deployDevice, undeployDevice } from "./plc4x.js";
 import { AlarmEngine } from "./alarms.js";
+import { BatchTracker } from "./batches.js";
 import { runAssistant, getPending, consumePending, type ChatMessage } from "./assistant.js";
 
 const KAFKA_BROKERS = (process.env.KAFKA_BROKERS ?? "redpanda:9092").split(",");
@@ -180,6 +181,8 @@ async function audit(
 
 // Moteur d'alarmes (détection de seuils sur tags.raw). Démarré dans main().
 const alarmEngine = new AlarmEngine(pool, audit);
+// Suivi des batchs (persistance ouverture/clôture depuis les tags <ligne>.batch.*).
+const batchTracker = new BatchTracker(pool, audit);
 
 // Sur chaque requête : résout l'utilisateur courant depuis le cookie de session.
 app.addHook("preHandler", async (req) => {
@@ -509,6 +512,29 @@ app.post("/api/alarms/:id/ack", { preHandler: requireAuth }, async (req, reply) 
   if (rows.length === 0) return reply.code(404).send({ error: "introuvable" });
   await audit(req.user!.username, "alarm.ack", rows[0].tag);
   return rows[0];
+});
+
+// ─── Batchs — consultation (requireAuth) ──────────────────────────────────
+// Généalogie de batch : derniers brassages avec leur verdict QC. Base de
+// get_batch_context (assistant). Filtrable par recette (?recipe=ipa).
+app.get("/api/batches", { preHandler: requireAuth }, async (req) => {
+  const q = req.query as { recipe?: string; limit?: string };
+  const limit = Math.min(200, Number(q.limit) || 50);
+  const params: unknown[] = [];
+  let where = "";
+  if (q.recipe) {
+    params.push(q.recipe);
+    where = `WHERE recipe = $${params.length}`;
+  }
+  params.push(limit);
+  const { rows } = await pool.query(
+    `SELECT id, recipe, line, started_at, ended_at, status,
+            qc_verdict, defaut_type, rebut_pct, qc_notes
+     FROM batches ${where}
+     ORDER BY started_at DESC LIMIT $${params.length}`,
+    params,
+  );
+  return rows;
 });
 
 // Historique des alarmes (pour plus tard).
@@ -1317,6 +1343,12 @@ async function startConsumer() {
       alarmEngine.onMeasure(m.tag, value).catch((e) =>
         app.log.error(`alarme: ${(e as Error).message}`),
       );
+      // Suivi des batchs : sur la valeur BRUTE (codes/compteurs exacts, pas de scaling).
+      if (m.tag.includes(".batch.")) {
+        batchTracker.onMeasure(m.tag, m.value).catch((e) =>
+          app.log.error(`batch: ${(e as Error).message}`),
+        );
+      }
       // On pousse la valeur SCALÉE au navigateur (cohérent avec l'historique),
       // mais SEULEMENT aux clients qui ont le droit de LIRE ce tag (filtrage RBAC).
       const out = JSON.stringify({ ...m, value });
