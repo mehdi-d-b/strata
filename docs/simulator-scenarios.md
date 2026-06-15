@@ -132,8 +132,11 @@ on remplace la *source du verdict* par une **saisie QC** (opérateur/LIMS) dans 
 - **Modèle de détection** ✅ : verdict par **sévérité intégrée** `∫ max(0, seuil − qualité) dt`
   (capte court-mais-sévère *et* lent), et **bruit de mesure** (sur le tag publié) au lieu d'un bruit
   qui dérive l'état — une cuve nominale a donc une sévérité exactement nulle.
-- **Recettes enrichies** (étape 5, à venir) : phases avec consigne + tolérance par phase, et une 3ᵉ
-  recette de variété (ex. `jalapeno`). Les bandes nominales deviennent `consigne ± tolérance`.
+- **Recettes enrichies / bandes nominales** ✅ : chaque cuve = une phase avec sa consigne
+  (`temp_cible`) et sa tolérance (`temp_tol`, désormais **publiée**) → la bande nominale
+  `[temp_cible ± temp_tol]` est une **donnée** (par phase, et par recette via le nom du tag).
+  3ᵉ recette ajoutée (`jalapeno`) ; les consignes varient par recette (ex. fermenteur 12/20/19,
+  empâteur 65/66/64). C'est ce qui rend la déviation calculable génériquement par `get_batch_context`.
 
 ---
 
@@ -211,7 +214,7 @@ Tous les scénarios tournent en **rotation** (`CYCLE_PLANS`) — un défaut net 
 | Verdict QC + `defaut_type` calculés | faible | l'effet devient donnée |
 | Variable `cip_ok` (axe sanitation) | faible | S3, discrimination |
 | Action « dérive progressive » (scénario) | faible | S5, réalisme |
-| Recettes enrichies (phases/bandes, ex. jalapeño) | moyen-bas | bandes nominales non-arbitraires |
+| Recettes enrichies + bande `temp_tol` publiée + 3ᵉ recette (jalapeño) ✅ | moyen-bas | bandes nominales = donnée, exploitables par `get_batch_context` |
 
 ## Ordre conseillé
 
@@ -219,7 +222,10 @@ Tous les scénarios tournent en **rotation** (`CYCLE_PLANS`) — un défaut net 
 2. ✅ **Gateway** : table `batches` + écriture à la clôture + `GET /api/batches`.
 3. ✅ **Scénarios** : rotation déclenchable/reproductible + S1/S2/S4.
 4. ✅ **Discrimination & réalisme** : `cip_ok` (S3) + dérive lente (S5) + sévérité intégrée.
-5. **Variété** : recettes enrichies (phases, jalapeño) — quand le reste tourne. ⟵ *reste à faire*
+5. ✅ **Variété & bandes** : recettes enrichies, `temp_tol` publiée, 3ᵉ recette (jalapeño).
+
+> ✅ Terrain (étapes 1→5) complet. Suite = **harness** : `get_batch_context` (cf.
+> [assistant-roadmap.md](assistant-roadmap.md)).
 
 > Suite logique côté assistant (hors de ce doc) : `get_batch_context` → puis le workflow RCA
 > routé. Le réglage fin du raisonnement attendra un GPU + un modèle plus gros ; toute la

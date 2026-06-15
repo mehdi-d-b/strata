@@ -139,6 +139,10 @@ class Vessel:
             f"{p}.state": float(_STATE_CODE[self.state.value]),
             f"{p}.temperature": round(measured, 2),
             f"{p}.temp_cible": self.target_temp,
+            # Tolérance publiée -> la BANDE NOMINALE [temp_cible ± temp_tol] devient une
+            # donnée (par cuve = par phase, par recette via le nom du tag). C'est ce qui
+            # rend la déviation calculable génériquement (cf. get_batch_context).
+            f"{p}.temp_tol": self.tolerance,
             f"{p}.qualite": round(self.quality * 100, 1),  # %
         }
 
@@ -370,23 +374,28 @@ class Brewery:
 
     @classmethod
     def default(cls) -> "Brewery":
-        """Deux recettes : une Blonde (lager, ferment. froide) et une IPA (ale, chaude)."""
-        def line(name: str, ferment_temp: float, cadence: float) -> Recipe:
+        """Trois recettes, chacune avec ses consignes/bandes par phase (empâtage,
+        ébullition, fermentation) : Blonde (lager), IPA (ale) et Jalapeño (ale épicée).
+        Le nom du tag portant la recette, les bandes nominales sont de fait par recette.
+        """
+        def line(name: str, ferment_temp: float, cadence: float,
+                 mash_temp: float = 65.0) -> Recipe:
             return Recipe(
                 name=name,
                 vessels=[
-                    # Empâtage : plage enzymatique étroite ~65 °C (au-delà, enzymes tuées).
-                    Vessel("empateur", target_temp=65.0, tolerance=4.0),
+                    # Empâtage : plage enzymatique étroite (au-delà, enzymes dénaturées).
+                    Vessel("empateur", target_temp=mash_temp, tolerance=4.0),
                     # Ébullition du moût + houblon : ~100 °C.
                     Vessel("ebullition", target_temp=100.0, tolerance=6.0),
-                    # Fermentation : LE paramètre qui distingue les recettes.
+                    # Fermentation : LE paramètre qui distingue le plus les recettes.
                     Vessel("fermenteur", target_temp=ferment_temp, tolerance=3.0),
                 ],
                 bottler=Bottler(nominal_cadence=cadence),
             )
         return cls(recipes=[
-            line("blonde", ferment_temp=12.0, cadence=50),  # lager, fermentation froide
-            line("ipa", ferment_temp=20.0, cadence=40),     # ale, fermentation chaude
+            line("blonde", ferment_temp=12.0, cadence=50, mash_temp=65.0),   # lager, ferment. froide
+            line("ipa", ferment_temp=20.0, cadence=40, mash_temp=66.0),      # ale, ferment. chaude
+            line("jalapeno", ferment_temp=19.0, cadence=35, mash_temp=64.0), # ale épicée
         ])
 
     def find_vessel(self, recipe: str, vessel: str) -> Vessel | None:

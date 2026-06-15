@@ -136,20 +136,23 @@ SCENARIOS: dict[str, Callable[[str], list[Step]]] = {
 }
 
 # Rotation des cycles : chaque entrée = {ligne: scénario} pour un cycle. On varie
-# pour accumuler des batchs aux verdicts différents (dont des batchs conformes).
+# pour accumuler des batchs aux verdicts différents (dont des batchs conformes). Une
+# ligne absente d'un plan = nominale (brew_all/stop_all démarrent toutes les lignes).
 CYCLE_PLANS: list[dict[str, str]] = [
-    {"ipa": "fermentation_hors_spec", "blonde": "nominal"},
-    {"ipa": "nominal", "blonde": "rendement_faible"},
-    {"ipa": "volume_insuffisant", "blonde": "nominal"},
-    {"ipa": "contamination", "blonde": "nominal"},
-    {"ipa": "nominal", "blonde": "derive_lente"},
-    {"ipa": "nominal", "blonde": "nominal"},
+    {"ipa": "fermentation_hors_spec"},
+    {"blonde": "rendement_faible"},
+    {"ipa": "volume_insuffisant"},
+    {"ipa": "contamination"},
+    {"blonde": "derive_lente"},
+    {"jalapeno": "rendement_faible"},
+    {},  # cycle tout-nominal
 ]
 
 
-def single_plan(scenario: str, line: str = "ipa", other: str = "blonde") -> list[dict[str, str]]:
-    """Rotation à un seul plan : force `scenario` sur `line` à chaque cycle (mode déclenché)."""
-    return [{line: scenario, other: "nominal"}]
+def single_plan(scenario: str, line: str = "ipa") -> list[dict[str, str]]:
+    """Rotation à un seul plan : force `scenario` sur `line` à chaque cycle (mode
+    déclenché). Les autres lignes restent nominales (absentes du plan)."""
+    return [{line: scenario}]
 
 
 class ScenarioRunner:

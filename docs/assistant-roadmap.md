@@ -54,7 +54,7 @@ pour le raisonnement fin.
 | Généalogie de batch (entité, fenêtre, verdict) | ✅ | cerveau + table `batches` + `BatchTracker` + `GET /api/batches` |
 | Scénarios causaux (1 défaut net/batch, rotatifs) | ✅ | S1–S5, cf. [simulator-scenarios.md](simulator-scenarios.md) |
 | Métriques honnêtes (sévérité intégrée, bruit de mesure) | ✅ | base d'une vraie « déviation vs nominal » |
-| Bandes nominales `consigne ± tolérance` par tag/recette | ⬜ | étape 5 (recettes enrichies) — rend la déviation *générale* |
+| Bandes nominales `consigne ± tolérance` par tag/recette | ✅ | publiées via `temp_cible`/`temp_tol` ; 3ᵉ recette (jalapeño) |
 | Ingestion d'états d'interlock/permissifs (PLC) | ⬜ | prérequis du diagnostic « pourquoi le bouton ne fait rien » |
 | Saisie verdict QC (UI/LIMS) — pour une vraie usine | ⬜ | en sim, c'est l'oracle qui calcule |
 
