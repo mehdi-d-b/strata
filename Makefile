@@ -1,7 +1,13 @@
-.PHONY: up down logs ps clean
+.PHONY: up up-ai logs ps down clean
 
-up:        ## Démarre le stack en arrière-plan
+ASSISTANT_MODEL ?= qwen2.5:7b
+
+up:        ## Démarre le stack en arrière-plan (sans profils optionnels)
 	docker compose up -d
+
+up-ai:     ## Démarre le stack + assistant IA (Ollama) et télécharge le modèle
+	docker compose --profile ai up -d
+	docker compose exec ollama ollama pull $(ASSISTANT_MODEL)
 
 down:      ## Arrête le stack (tous profils inclus : ai, plc4x, risingwave)
 	docker compose --profile ai --profile plc4x --profile risingwave down --remove-orphans
