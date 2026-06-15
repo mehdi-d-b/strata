@@ -67,7 +67,7 @@ def repair_bottler(recipe: str) -> Action:
 
 DEMO_SCENARIO: list[Step] = [
     Step(5,   "🍺 Ouverture : on lance le brassage des deux cuvées", brew_all()),
-    Step(90,  "🌡️  Le thermostat du fermenteur IPA s'emballe (+8°C) → esters, goût de banane",
+    Step(90,  "🌡️  Le thermostat du fermenteur IPA s'emballe (+8°C) → fermentation hors spec",
               nudge_temp("ipa", "fermenteur", 8.0)),
     Step(150, "🔧 Le brasseur recale le fermenteur IPA",
               nudge_temp("ipa", "fermenteur", -8.0)),
@@ -75,7 +75,7 @@ DEMO_SCENARIO: list[Step] = [
               trip_bottler("blonde")),
     Step(230, "🔧 Embouteilleuse Blonde débloquée et relancée",
               repair_bottler("blonde")),
-    Step(280, "🥵 Coup de chaud sur l'empâteur Blonde (+10°C) → enzymes grillées, moût trouble",
+    Step(280, "🥵 Coup de chaud sur l'empâteur Blonde (+10°C) → enzymes dénaturées, rendement faible",
               nudge_temp("blonde", "empateur", 10.0)),
     Step(320, "❄️  Refroidissement de l'empâteur Blonde, retour dans la plage",
               nudge_temp("blonde", "empateur", -10.0)),
