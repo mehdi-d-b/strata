@@ -60,7 +60,8 @@ const TOOLS = [
     type: "function",
     function: {
       name: "get_history",
-      description: "Résumé de l'historique d'un tag sur les N dernières minutes : dernière valeur, min, max, moyenne (valeurs scalées).",
+      description:
+        "Tendance d'un tag sur N minutes : valeur ACTUELLE + points sous-échantillonnés (pour décrire l'évolution). Pas de moyenne globale (souvent trompeuse sur un signal physique).",
       parameters: {
         type: "object",
         properties: {
@@ -134,23 +135,27 @@ export type PendingEntry = { username: string; tool: string; args: Args; created
 const PENDING = new Map<string, PendingEntry>();
 const PENDING_TTL_MS = 10 * 60 * 1000;
 
-function summarize(tool: string, args: Args): string {
+async function summarize(pool: pg.Pool, tool: string, args: Args): Promise<string> {
   switch (tool) {
     case "set_command":
       return `écrire la consigne ${args.value} sur le tag « ${args.tag} »`;
-    case "ack_alarm":
-      return `acquitter l'alarme ${args.alarm_id}`;
+    case "ack_alarm": {
+      // Affiche le tag de l'alarme (plus lisible que l'uuid) si on le retrouve.
+      const { rows } = await pool.query("SELECT tag FROM alarms WHERE id = $1", [String(args.alarm_id ?? "")]);
+      const tag = rows[0]?.tag;
+      return tag ? `acquitter l'alarme « ${tag} »` : `acquitter l'alarme ${args.alarm_id}`;
+    }
     default:
       return `${tool}(${JSON.stringify(args)})`;
   }
 }
 
-function addPending(username: string, tool: string, args: Args): PendingAction {
+async function addPending(pool: pg.Pool, username: string, tool: string, args: Args): Promise<PendingAction> {
   const now = Date.now();
   for (const [k, v] of PENDING) if (now - v.createdAt > PENDING_TTL_MS) PENDING.delete(k);
   const id = randomUUID();
   PENDING.set(id, { username, tool, args, createdAt: now });
-  return { id, tool, args, summary: summarize(tool, args) };
+  return { id, tool, args, summary: await summarize(pool, tool, args) };
 }
 
 /** Récupère une action en attente non expirée (pour /confirm). */
@@ -170,6 +175,19 @@ export function consumePending(id: string): void {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Args = Record<string, any>;
+
+/** Args d'un tool-call : objet (API native Ollama) ou string JSON (compat OpenAI). */
+function toArgs(raw: unknown): Args {
+  if (raw && typeof raw === "object") return raw as Args;
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw || "{}");
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
 
 /** Exécute un tool (LECTURE seule). Renvoie une chaîne (JSON) destinée au modèle. */
 async function execTool(pool: pg.Pool, user: AuthUser | null, name: string, args: Args): Promise<string> {
@@ -206,7 +224,7 @@ async function execTool(pool: pg.Pool, user: AuthUser | null, name: string, args
     }
     case "list_alarms": {
       const { rows } = await pool.query(
-        `SELECT tag, severity, message, raised_at FROM alarms
+        `SELECT id, tag, severity, message, acked, raised_at FROM alarms
          WHERE state='active' ORDER BY raised_at DESC LIMIT 50`,
       );
       return JSON.stringify(rows);
@@ -219,18 +237,20 @@ async function execTool(pool: pg.Pool, user: AuthUser | null, name: string, args
       const cfg = await pool.query(`SELECT scale, offset_val FROM tags WHERE name = $1`, [tag]);
       const s = Number(cfg.rows[0]?.scale ?? 1);
       const o = Number(cfg.rows[0]?.offset_val ?? 0);
+      const bucketMin = Math.max(1, Math.round(minutes / 20)); // ~20 points sur la fenêtre
       const { rows } = await pool.query(
-        `SELECT min(value) AS mn, max(value) AS mx, avg(value) AS av, count(*) AS n,
-                (SELECT value FROM mesures WHERE tag=$1 ORDER BY ts DESC LIMIT 1) AS last_raw
-         FROM mesures WHERE tag=$1 AND ts > now() - ($2 || ' minutes')::interval`,
-        [tag, minutes],
+        `SELECT time_bucket(($2 || ' minutes')::interval, ts) AS t, avg(value) AS v
+         FROM mesures WHERE tag = $1 AND ts > now() - ($3 || ' minutes')::interval
+         GROUP BY t ORDER BY t`,
+        [tag, bucketMin, minutes],
       );
-      const r = rows[0];
-      const scale = (v: unknown) => (v == null ? null : Number(v) * s + o);
-      return JSON.stringify({
-        tag, minutes, samples: Number(r.n),
-        last: scale(r.last_raw), min: scale(r.mn), max: scale(r.mx), avg: scale(r.av),
-      });
+      const sc = (v: unknown) => (v == null ? null : Math.round((Number(v) * s + o) * 1000) / 1000);
+      const points = rows.map((r) => ({ t: r.t, v: sc(r.v) }));
+      const current = points.length ? points[points.length - 1].v : null;
+      // Tendance brute : valeur actuelle + points (la courbe parle). PAS de moyenne
+      // globale — une métrique qui a du sens est spécifique au signal et doit être
+      // définie comme tag dérivé (cf. docs/llm-integration.md), pas calculée naïvement ici.
+      return JSON.stringify({ tag, minutes, current, points });
     }
     case "describe_schema": {
       // N'expose que ce que strata_ro peut lire (les grants = source de vérité).
@@ -277,7 +297,9 @@ async function execTool(pool: pg.Pool, user: AuthUser | null, name: string, args
 const SYSTEM_PROMPT =
   "Tu es l'assistant de Strata, une plateforme de supervision de données industrielles " +
   "(démo : une micro-brasserie avec 2 lignes, blonde et ipa). Réponds en français, de façon " +
-  "concise. Pour toute donnée chiffrée (OEE, production, alarmes, mesures), utilise TOUJOURS les " +
+  "concise et PRÉCISE : réponds exactement à la question posée, sans analyse, résumé ni " +
+  "recommandations non demandés. Si on demande une seule chose (la dernière alarme, un chiffre…), " +
+  "donne juste ça. Pour toute donnée chiffrée (OEE, production, alarmes, mesures), utilise TOUJOURS les " +
   "tools — n'invente jamais de valeurs. Si une donnée n'est pas disponible via un tool, dis-le. " +
   "Pour une question non couverte par get_oee/get_production/list_alarms/get_history, utilise " +
   "describe_schema (pour voir les tables/colonnes) puis query_readonly avec un SELECT PostgreSQL " +
@@ -305,26 +327,23 @@ export async function runAssistant(
   const messages: any[] = [{ role: "system", content: SYSTEM_PROMPT }, ...clean];
 
   for (let step = 0; step < MAX_STEPS; step++) {
-    const resp = await fetch(`${OLLAMA_URL}/v1/chat/completions`, {
+    // API NATIVE Ollama (/api/chat) : elle honore `num_ctx` (l'endpoint /v1 compatible
+    // OpenAI l'ignore → contexte resté à ~2048, d'où les troncatures). qwen2.5 va
+    // jusqu'à 32k ; 8192 suffit largement pour prompt + tools + résultats.
+    const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         model: MODEL,
         messages,
         tools: TOOLS,
-        tool_choice: "auto",
         stream: false,
-        temperature: 0.2,
-        // Contexte par défaut d'Ollama = 2048 tokens : trop court dès qu'un tool
-        // renvoie un gros résultat (ex. describe_schema) → on l'agrandit.
-        options: { num_ctx: 8192 },
+        options: { num_ctx: 8192, temperature: 0.2 },
       }),
     });
     if (!resp.ok) throw new Error(`Ollama ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
-    const data = (await resp.json()) as {
-      choices?: { message?: ChatMessage }[];
-    };
-    const msg = data.choices?.[0]?.message;
+    const data = (await resp.json()) as { message?: ChatMessage };
+    const msg = data.message;
     if (!msg) throw new Error("réponse LLM vide");
 
     if (msg.tool_calls?.length) {
@@ -334,13 +353,8 @@ export async function runAssistant(
         WRITE_TOOLS.has(tc.function?.name ?? ""),
       );
       if (writeCall) {
-        let wargs: Args = {};
-        try {
-          wargs = JSON.parse(writeCall.function?.arguments || "{}");
-        } catch {
-          /* arguments non-JSON : objet vide */
-        }
-        const pendingAction = addPending(username, writeCall.function?.name ?? "", wargs);
+        const wargs = toArgs(writeCall.function?.arguments);
+        const pendingAction = await addPending(pool, username, writeCall.function?.name ?? "", wargs);
         // On renvoie AUSSI un texte : un front qui ne gère pas encore pendingAction
         // affiche au moins la proposition (au lieu d'un message vide).
         return {
@@ -351,19 +365,15 @@ export async function runAssistant(
       }
       messages.push(msg);
       for (const tc of msg.tool_calls) {
-        let args: Args = {};
-        try {
-          args = JSON.parse(tc.function?.arguments || "{}");
-        } catch {
-          /* arguments non-JSON : on passe un objet vide */
-        }
+        const args = toArgs(tc.function?.arguments);
         let result: string;
         try {
           result = await execTool(pool, user, tc.function?.name, args);
         } catch (e) {
           result = JSON.stringify({ error: (e as Error).message });
         }
-        messages.push({ role: "tool", tool_call_id: tc.id, name: tc.function?.name, content: result });
+        // API native Ollama : message tool = { role, content } (pas de tool_call_id).
+        messages.push({ role: "tool", content: result });
       }
       continue;
     }

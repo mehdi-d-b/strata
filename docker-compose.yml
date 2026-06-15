@@ -208,7 +208,7 @@ services:
       KAFKA_CONNECT_URL: "http://kafka-connect:8083"
       # Assistant IA local (profil `ai`) : runtime Ollama + modèle. Absent = chat désactivé.
       OLLAMA_URL: "http://ollama:11434"
-      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-qwen2.5:3b}
+      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-qwen2.5:7b}
     ports:
       - "3001:3001"
     restart: unless-stopped
