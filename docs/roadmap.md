@@ -237,6 +237,8 @@ rétention sans toucher au SQL »).
       l'intérieur ; le monitoring infra « vrai » reste externe (Console, Grafana).
 
 ### Assistant IA — 100 % local (cf. docs/llm-integration.md)
+> 🧭 **Fil conducteur terrain → harness → modèle : [docs/assistant-roadmap.md](assistant-roadmap.md)**
+> (câblage = llm-integration.md ; terrain données = simulator-scenarios.md)
 - [x] **v1 — agent in-app (Chemin B)** : profil Docker `ai` (**Ollama**, modèle open-source
       `qwen2.5:3b`), boucle d'agent dans la gateway (`POST /api/assistant/chat`) + **tools de
       lecture** (`get_oee`, `get_production`, `list_alarms`, `get_history`) exécutés côté gateway.
