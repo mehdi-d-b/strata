@@ -76,7 +76,14 @@ export function LiveView() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [query, setQuery] = useState("");
   const [prefix, setPrefix] = useState<string[]>([]);
-  const [selected, setSelected] = useState<Selected[]>([]);
+  const [selected, setSelected] = useState<Selected[]>(() => {
+    try {
+      const saved = sessionStorage.getItem("explorer:selected");
+      return saved ? (JSON.parse(saved) as Selected[]) : [];
+    } catch {
+      return [];
+    }
+  });
   const [range, setRange] = useState<Range>(() => ({
     mode: "relative",
     sec: loadPrefs().defaultWindowSec,
@@ -95,6 +102,10 @@ export function LiveView() {
     toLocalInput(new Date(Date.now() - 3600_000)),
   );
   const [absTo, setAbsTo] = useState(() => toLocalInput(new Date()));
+
+  useEffect(() => {
+    sessionStorage.setItem("explorer:selected", JSON.stringify(selected));
+  }, [selected]);
 
   // Refs pour les guards dans la boucle de frames (sans recréer la socket).
   const pausedRef = useRef(false);

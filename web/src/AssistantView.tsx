@@ -60,7 +60,7 @@ function Thinking() {
             />
           ))}
         </span>
-        L'assistant réfléchit… <span className="text-[11px] opacity-70">(peut être long sur CPU)</span>
+        L'assistant réfléchit…
       </div>
     </div>
   );

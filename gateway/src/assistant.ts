@@ -52,7 +52,7 @@ const TOOLS = [
     type: "function",
     function: {
       name: "list_alarms",
-      description: "Alarmes actuellement actives (tag, sévérité, message, depuis quand).",
+      description: "Alarmes actives OU retombées mais non encore acquittées (tag, sévérité, message, état, depuis quand).",
       parameters: { type: "object", properties: {} },
     },
   },
@@ -239,8 +239,9 @@ async function execTool(pool: pg.Pool, user: AuthUser | null, name: string, args
     }
     case "list_alarms": {
       const { rows } = await pool.query(
-        `SELECT id, tag, severity, message, acked, raised_at FROM alarms
-         WHERE state='active' ORDER BY raised_at DESC LIMIT 50`,
+        `SELECT id, tag, severity, message, state, acked, raised_at, cleared_at FROM alarms
+         WHERE state='active' OR (state='cleared' AND acked=false)
+         ORDER BY raised_at DESC LIMIT 50`,
       );
       return JSON.stringify(rows);
     }
@@ -463,7 +464,9 @@ const SYSTEM_PROMPT =
   "donne juste ça. Pour toute donnée chiffrée (OEE, production, alarmes, mesures), utilise TOUJOURS les " +
   "tools — n'invente jamais de valeurs. Si une donnée n'est pas disponible via un tool, dis-le. " +
   "Pour DIAGNOSTIQUER un batch (pourquoi un brassage est raté / hors spec, qu'est-ce qui a dévié), " +
-  "utilise get_batch_context. COMMENCE par le champ `conforme` : s'il est vrai (verdict 'ok'), le " +
+  "APPELLE TOUJOURS get_batch_context — même si un batch a déjà été analysé dans ce chat. Les données " +
+  "de batch dans l'historique concernent un AUTRE batch : ne les réutilise jamais pour répondre sur un " +
+  "nouveau batch ID. COMMENCE par le champ `conforme` : s'il est vrai (verdict 'ok'), le " +
   "batch est CONFORME — dis-le clairement et N'INVENTE PAS de défaut, même si la question suppose un " +
   "problème. Si non conforme, le DÉFAUT est donné par `defaut_type` (c'est LE résultat QC) : énonce-le, " +
   "puis EXPLIQUE-le avec `cip_ok` (faux => contamination/sanitation) et `cuves_hors_bande` (cuves en " +
@@ -477,12 +480,22 @@ const SYSTEM_PROMPT =
   "ce sont des PROPOSITIONS soumises à confirmation humaine — tu n'exécutes jamais directement.";
 
 /** Boucle d'agent : appelle le LLM, exécute les tools demandés, jusqu'à la réponse. */
+function agentLog(runId: string, event: Record<string, unknown>) {
+  console.log(JSON.stringify({ agent: true, run: runId, ...event }));
+}
+
 export async function runAssistant(
   pool: pg.Pool,
   user: AuthUser | null,
   history: ChatMessage[],
 ): Promise<{ answer?: string; pendingAction?: PendingAction; steps: number }> {
   const username = user?.username ?? "anonymous";
+  const runId = randomUUID().slice(0, 8);
+  const t0 = Date.now();
+
+  const userMsg = history.filter((m) => m.role === "user").at(-1)?.content ?? "";
+  agentLog(runId, { event: "start", user: username, history_turns: history.length, question: userMsg.slice(0, 120) });
+
   // Nettoie l'historique reçu du front (persistance) : on ne garde que des tours
   // user/assistant à contenu non vide, on borne la longueur. Évite qu'un message
   // mal formé (ex. contenu vide d'une ancienne proposition) ne fasse planter Ollama.
@@ -499,6 +512,7 @@ export async function runAssistant(
     // API NATIVE Ollama (/api/chat) : elle honore `num_ctx` (l'endpoint /v1 compatible
     // OpenAI l'ignore → contexte resté à ~2048, d'où les troncatures). qwen2.5 va
     // jusqu'à 32k ; 8192 suffit largement pour prompt + tools + résultats.
+    const tLlm = Date.now();
     const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -514,6 +528,7 @@ export async function runAssistant(
     const data = (await resp.json()) as { message?: ChatMessage };
     const msg = data.message;
     if (!msg) throw new Error("réponse LLM vide");
+    agentLog(runId, { event: "llm", step, ms: Date.now() - tLlm, tools_requested: msg.tool_calls?.map((tc: { function?: { name?: string } }) => tc.function?.name) ?? null });
 
     if (msg.tool_calls?.length) {
       // Action d'écriture demandée ? On INTERCEPTE la 1ère : aucune exécution, on
@@ -524,6 +539,7 @@ export async function runAssistant(
       if (writeCall) {
         const wargs = toArgs(writeCall.function?.arguments);
         const pendingAction = await addPending(pool, username, writeCall.function?.name ?? "", wargs);
+        agentLog(runId, { event: "done", steps: step + 1, ms: Date.now() - t0, outcome: "write_intercepted", tool: writeCall.function?.name });
         // On renvoie AUSSI un texte : un front qui ne gère pas encore pendingAction
         // affiche au moins la proposition (au lieu d'un message vide).
         return {
@@ -535,18 +551,23 @@ export async function runAssistant(
       messages.push(msg);
       for (const tc of msg.tool_calls) {
         const args = toArgs(tc.function?.arguments);
+        const tTool = Date.now();
         let result: string;
         try {
           result = await execTool(pool, user, tc.function?.name, args);
         } catch (e) {
           result = JSON.stringify({ error: (e as Error).message });
         }
+        agentLog(runId, { event: "tool", step, name: tc.function?.name, args, result_bytes: result.length, ms: Date.now() - tTool });
         // API native Ollama : message tool = { role, content } (pas de tool_call_id).
         messages.push({ role: "tool", content: result });
       }
       continue;
     }
-    return { answer: msg.content?.trim() || "(je n'ai pas su formuler de réponse — peux-tu reformuler ?)", steps: step };
+    const answer = msg.content?.trim() || "(je n'ai pas su formuler de réponse — peux-tu reformuler ?)";
+    agentLog(runId, { event: "done", steps: step + 1, ms: Date.now() - t0, outcome: "answer", answer_chars: answer.length });
+    return { answer, steps: step };
   }
+  agentLog(runId, { event: "done", steps: MAX_STEPS, ms: Date.now() - t0, outcome: "max_steps" });
   return { answer: "(j'ai atteint la limite d'étapes ; reformule peut-être ta question)", steps: MAX_STEPS };
 }
