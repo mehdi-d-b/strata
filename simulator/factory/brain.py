@@ -32,21 +32,35 @@ class State(str, Enum):
 
 _STATE_CODE = {"stopped": 0, "running": 1, "fault": 2}
 
+# Bruit de MESURE (sur la valeur publiée uniquement) : un capteur réel bruite la
+# lecture, il ne fait pas DÉRIVER la température réelle. L'état reste lissé/tenu par
+# la régulation ; ce bruit ne s'ajoute qu'au tag publié (cf. Vessel.tags).
+_MEAS_NOISE = 0.2  # °C
+
 # Codes de verdict QC d'un batch (NUMÉRIQUES car tags.raw ne transporte que des
 # nombres). La gateway mappe ces codes vers un defaut_type texte pour la table
-# `batches` (cf. docs/simulator-scenarios.md).
+# `batches`. Un verdict = RÉSULTAT QC (le batch est-il conforme, quel défaut), pas la
+# forme de la cause : une dérive lente et un emballement rapide donnent le MÊME
+# verdict fermentation_hors_spec — c'est la timeline que l'assistant analyse pour
+# remonter à la cause. NB : ici c'est le simulateur (oracle) qui calcule le verdict ;
+# en usine réelle il vient du QC/labo (cf. docs/simulator-scenarios.md).
 VERDICT_OK = 0
-VERDICT_FERMENTATION_HORS_SPEC = 1   # fermenteur hors plage (S1)
+VERDICT_FERMENTATION_HORS_SPEC = 1   # fermenteur hors plage (S1 emballement, S5 dérive lente)
 VERDICT_RENDEMENT_FAIBLE = 2         # empâtage/ébullition hors plage (S2)
-VERDICT_CONTAMINATION = 3            # sanitation insuffisante / CIP écourté (S3) — à venir
+VERDICT_CONTAMINATION = 3            # sanitation insuffisante / CIP écourté (S3)
 VERDICT_VOLUME_INSUFFISANT = 4       # objectif de volume manqué, qualité OK (S4)
-VERDICT_DERIVE_NON_RATTRAPEE = 5     # dérive lente non rattrapée (S5) — à venir
 
-# Seuils de décision du verdict, en secondes de temps SIMULÉ.
+# Décision du verdict.
 _SETTLED_QUALITY = 0.95        # qualité atteinte une 1ère fois = cuve stabilisée à sa cible
-_OB_QUALITY_THRESHOLD = 0.85   # qualité cuve en dessous = "hors plage"
-_OB_SECONDS_DEFECT = 20.0      # durée hors plage qui qualifie un défaut qualité
+_OB_QUALITY_THRESHOLD = 0.85   # bande "bonne" ; en dessous = déviation
+# On mesure la SÉVÉRITÉ INTÉGRÉE de la déviation, pas une durée binaire :
+#   score = ∫ max(0, seuil - qualité) dt   (aire sous la bande, pondérée par l'ampleur).
+# Ainsi une dérive COURTE mais SÉVÈRE est vue, une dérive LENTE aussi, et le bruit de
+# stabilisation (qualité au ras du seuil quelques secondes) reste négligeable — la
+# détection dépend de la GRAVITÉ réelle, pas du timing.
+_SEVERITY_DEFECT = 4.0         # score de sévérité qui qualifie un défaut qualité
 _FAULT_SECONDS_DEFECT = 20.0   # durée de panne embouteilleuse → volume_insuffisant
+_CONTAM_QUALITY_FACTOR = 0.6   # CIP écourté : qualité de ligne dégradée (indépendante de la temp)
 
 
 @dataclass
@@ -64,6 +78,8 @@ class Vessel:
     state: State = State.STOPPED
     temperature: float = 20.0
     _ramp: float = 0.0        # 0..1 montée en régime thermique
+    drift_rate: float = 0.0   # dérive lente : vitesse de décalage de l'équilibre (°C/s) (S5)
+    _drift_offset: float = 0.0  # décalage d'équilibre accumulé (°C)
 
     def start(self) -> None:
         if self.state != State.FAULT:
@@ -84,10 +100,20 @@ class Vessel:
         target_ramp = 1.0 if running else 0.0
         self._ramp += (target_ramp - self._ramp) * min(1.0, dt / 10.0)
 
+        # Dérive lente (S5) : l'ÉQUILIBRE thermique se décale peu à peu (ex. groupe
+        # froid qui faiblit). On déplace le point d'équilibre, pas la température
+        # directement : la régulation suit sans "voir" l'erreur, donc la vraie
+        # température part doucement hors plage (et n'est pas compensée).
+        if running and self.drift_rate:
+            self._drift_offset += self.drift_rate * dt
         # La cuve chauffe vers sa cible quand elle tourne, refroidit à l'arrêt.
-        setpoint = self.base_cold + (self.target_temp - self.base_cold) * self._ramp
+        # État LISSÉ (régulation) : pas de bruit ajouté ici — le bruit est une mesure
+        # (cf. Vessel.tags), il ne fait pas dériver la température réelle.
+        setpoint = (
+            self.base_cold + (self.target_temp - self.base_cold) * self._ramp
+            + self._drift_offset
+        )
         self.temperature += (setpoint - self.temperature) * min(1.0, dt / 25.0)
-        self.temperature += random.gauss(0, 0.2)  # bruit capteur
 
     @property
     def quality(self) -> float:
@@ -106,9 +132,12 @@ class Vessel:
 
     def tags(self, prefix: str) -> dict[str, float]:
         p = f"{prefix}.{self.name}"
+        # Température PUBLIÉE = vraie température + bruit de mesure (le capteur bruite
+        # la lecture, pas le procédé). La qualité/verdict se calculent sur la vraie.
+        measured = self.temperature + random.gauss(0, _MEAS_NOISE)
         return {
             f"{p}.state": float(_STATE_CODE[self.state.value]),
-            f"{p}.temperature": round(self.temperature, 2),
+            f"{p}.temperature": round(measured, 2),
             f"{p}.temp_cible": self.target_temp,
             f"{p}.qualite": round(self.quality * 100, 1),  # %
         }
@@ -189,10 +218,15 @@ class Recipe:
     vessels: list[Vessel]
     bottler: Bottler
 
+    # Sanitation (axe NON thermique) : nettoyage conforme avant brassage ? Un CIP
+    # écourté contamine le batch sans déviation de température (cause discriminante).
+    cip_ok: bool = True                                # consigne CIP du PROCHAIN batch
+
     # --- Cycle de batch ---
     batch_id: int = 0                                  # 0 = aucun batch actif
     batch_started_at: float = 0.0                      # epoch (s) du début du batch
-    _ob_seconds: dict[str, float] = field(default_factory=dict)  # s hors plage / cuve
+    _batch_cip_ok: bool = True                         # CIP du batch courant (figé à l'ouverture)
+    _severity: dict[str, float] = field(default_factory=dict)  # sévérité intégrée / cuve
     _settled: set[str] = field(default_factory=set)    # cuves ayant atteint leur cible
     _fault_seconds: float = 0.0                        # s de panne embouteilleuse
     _ok_at_start: int = 0
@@ -215,10 +249,17 @@ class Recipe:
 
     @property
     def upstream_quality(self) -> float:
-        """Qualité cumulée des cuves de procédé (produit des qualités)."""
+        """Qualité cumulée des cuves de procédé (produit des qualités).
+
+        Un CIP écourté contamine le moût : qualité dégradée INDÉPENDAMMENT de la
+        température (les cuves restent nominales) -> rebut qui monte, mais aucune
+        sévérité thermique. C'est ce qui rend la cause discriminable.
+        """
         q = 1.0
         for v in self.vessels:
             q *= v.quality
+        if self.batch_id != 0 and not self._batch_cip_ok:
+            q *= _CONTAM_QUALITY_FACTOR
         return q
 
     # --- Batch : ouverture / accumulation / clôture ---------------------------
@@ -227,28 +268,35 @@ class Recipe:
         now = time.time()
         self.batch_id = int(now)            # epoch s ; la gateway compose un id unique avec la ligne
         self.batch_started_at = now
-        self._ob_seconds = {v.name: 0.0 for v in self.vessels}
+        self._batch_cip_ok = self.cip_ok    # fige le CIP de CE batch
+        self.cip_ok = True                  # consigne consommée -> prochain batch propre par défaut
+        for v in self.vessels:
+            v.drift_rate = 0.0              # aucune dérive héritée du batch précédent
+            v._drift_offset = 0.0
+        self._severity = {v.name: 0.0 for v in self.vessels}
         self._settled = set()
         self._fault_seconds = 0.0
         self._ok_at_start = self.bottler.bottles_ok
         self._rebut_at_start = self.bottler.bottles_rebut
 
     def accumulate(self, dt: float) -> None:
-        """Compte le temps passé hors plage (par cuve) et en panne, pendant le batch."""
+        """Intègre la sévérité de déviation (par cuve) et la panne, pendant le batch."""
         if self.batch_id == 0:
             return
         for v in self.vessels:
             if v.state != State.RUNNING:
                 continue
             # Tant que la cuve n'a pas atteint sa cible une 1ère fois, on est en
-            # warmup : c'est normal, on ne compte rien. Une fois stabilisée, toute
-            # rechute de qualité est une vraie déviation (incident).
+            # warmup : c'est normal (le régime stable met du temps à arriver), on ne
+            # compte rien. Une fois stabilisée, on intègre l'aire sous la bande,
+            # pondérée par l'ampleur de la chute de qualité (sévérité × durée).
             if v.name not in self._settled:
                 if v.quality >= _SETTLED_QUALITY:
                     self._settled.add(v.name)
                 continue
-            if v.quality < _OB_QUALITY_THRESHOLD:
-                self._ob_seconds[v.name] = self._ob_seconds.get(v.name, 0.0) + dt
+            deficit = _OB_QUALITY_THRESHOLD - v.quality
+            if deficit > 0:
+                self._severity[v.name] = self._severity.get(v.name, 0.0) + deficit * dt
         if self.bottler.state == State.FAULT:
             self._fault_seconds += dt
 
@@ -260,15 +308,17 @@ class Recipe:
 
     def _decide_verdict(self) -> int:
         """Verdict CALCULÉ depuis l'observé. Défaut qualité prioritaire sur le volume."""
-        worst_name, worst_s = max(
-            self._ob_seconds.items(), key=lambda kv: kv[1], default=(None, 0.0)
+        worst_name, worst = max(
+            self._severity.items(), key=lambda kv: kv[1], default=(None, 0.0)
         )
-        if worst_s >= _OB_SECONDS_DEFECT:
+        if worst >= _SEVERITY_DEFECT:
             return (
                 VERDICT_FERMENTATION_HORS_SPEC
                 if worst_name == "fermenteur"
                 else VERDICT_RENDEMENT_FAIBLE
             )
+        if not self._batch_cip_ok:
+            return VERDICT_CONTAMINATION
         if self._fault_seconds >= _FAULT_SECONDS_DEFECT:
             return VERDICT_VOLUME_INSUFFISANT
         return VERDICT_OK
@@ -415,6 +465,8 @@ class Brewery:
             s[f"{prefix}.qualite_ligne"] = q
             # Warning qualité basse (event booléen de ligne).
             s[f"{prefix}.qualite_basse"] = 1.0 if q < 80 else 0.0
+            # Sanitation du batch courant (1 = CIP conforme) : cause discriminante.
+            s[f"{prefix}.cip_ok"] = 1.0 if r._batch_cip_ok else 0.0
             # Tags du batch (en cours ou dernier clôturé) : id, phase, verdict, rebut.
             s.update(r.batch_tags(prefix))
         return s
