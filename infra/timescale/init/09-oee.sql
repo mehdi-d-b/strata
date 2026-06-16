@@ -178,15 +178,16 @@ FROM factors;
 --    (Les rôles ok/scrap des compteurs .bouteilles_ok/_rebut sont auto-assignés par
 --     la gateway à la découverte du tag — seedDemoRole ; cf. gateway/src/index.ts.)
 -- ───────────────────────────────────────────────────────────────────────────
--- Cadences nominales = celles du simulateur (brain.py : blonde 50/min, ipa 40/min).
-INSERT INTO oee_line (line, label, ideal_rate, running_tag) VALUES
-    ('brasserie.blonde', 'Ligne Blonde', 50, 'brasserie.blonde.embouteilleuse.state'),
-    ('brasserie.ipa',    'Ligne IPA',    40, 'brasserie.ipa.embouteilleuse.state')
+-- Cadences nominales = celles du simulateur (brain.py : blonde 50/min, ipa 40/min, jalapeno 35/min).
+INSERT INTO oee_line (line, label, ideal_rate, running_tag, waiting_tag) VALUES
+    ('brasserie.blonde',   'Ligne Blonde',   50, 'brasserie.blonde.embouteilleuse.state',   'brasserie.blonde.embouteilleuse.en_attente'),
+    ('brasserie.ipa',      'Ligne IPA',      40, 'brasserie.ipa.embouteilleuse.state',      'brasserie.ipa.embouteilleuse.en_attente'),
+    ('brasserie.jalapeno', 'Ligne Jalapeño', 35, 'brasserie.jalapeno.embouteilleuse.state', 'brasserie.jalapeno.embouteilleuse.en_attente')
 ON CONFLICT DO NOTHING;
 
--- Objectifs de démo : cible OEE 80 %, objectif de pièces par shift (ordre de
--- grandeur d'un bon shift du sim ; blonde plus rapide que l'ipa).
+-- Objectifs de démo : cible OEE 80 %, objectif de pièces par shift.
 INSERT INTO oee_target (line, target_oee, target_pieces) VALUES
-    ('brasserie.blonde', 0.80, 30000),
-    ('brasserie.ipa',    0.80, 24000)
+    ('brasserie.blonde',   0.80, 30000),
+    ('brasserie.ipa',      0.80, 24000),
+    ('brasserie.jalapeno', 0.80, 21000)
 ON CONFLICT DO NOTHING;

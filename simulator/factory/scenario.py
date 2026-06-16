@@ -63,38 +63,123 @@ def repair_bottler(recipe: str) -> Action:
     return _a
 
 
-# ─── Scénario de démo : une « journée » à la brasserie (~6 min, en boucle) ──
+def skip_cip(recipe: str) -> Action:
+    """Saute le nettoyage avant brassage → contamination (cause NON thermique)."""
+    def _a(b: Brewery) -> None:
+        r = b.find_recipe(recipe)
+        if r:
+            r.cip_ok = False   # consommé à l'ouverture du prochain batch
+    return _a
 
-DEMO_SCENARIO: list[Step] = [
-    Step(5,   "🍺 Ouverture : on lance le brassage des deux cuvées", brew_all()),
-    Step(90,  "🌡️  Le thermostat du fermenteur IPA s'emballe (+8°C) → esters, goût de banane",
-              nudge_temp("ipa", "fermenteur", 8.0)),
-    Step(150, "🔧 Le brasseur recale le fermenteur IPA",
-              nudge_temp("ipa", "fermenteur", -8.0)),
-    Step(200, "💥 Bourrage sur l'embouteilleuse Blonde → panne",
-              trip_bottler("blonde")),
-    Step(230, "🔧 Embouteilleuse Blonde débloquée et relancée",
-              repair_bottler("blonde")),
-    Step(280, "🥵 Coup de chaud sur l'empâteur Blonde (+10°C) → enzymes grillées, moût trouble",
-              nudge_temp("blonde", "empateur", 10.0)),
-    Step(320, "❄️  Refroidissement de l'empâteur Blonde, retour dans la plage",
-              nudge_temp("blonde", "empateur", -10.0)),
-    Step(350, "🌙 Fin de poste : arrêt des cuves",
-              stop_all()),
-]
+
+def drift_temp(recipe: str, vessel: str, rate_per_min: float) -> Action:
+    """Installe une dérive LENTE de l'équilibre (°C/min). rate=0 stoppe ET recale
+    (l'équilibre revient à la cible : le technicien a corrigé)."""
+    def _a(b: Brewery) -> None:
+        v = b.find_vessel(recipe, vessel)
+        if v:
+            v.drift_rate = rate_per_min / 60.0  # le cerveau l'applique par seconde simulée
+            if rate_per_min == 0.0:
+                v._drift_offset = 0.0
+    return _a
+
+
+# ─── Catalogue de scénarios : UN défaut net par batch ───────────────────────
+#
+# Chaque scénario construit les étapes d'incident d'UNE ligne, dans la fenêtre d'un
+# cycle (= un batch). Objectif : que « le dernier batch IPA » ait une cause unique et
+# nette, exploitable pour tester l'assistant (cf. docs/simulator-scenarios.md).
+
 CYCLE_SECONDS = 360.0
+_CIP_AT = 2.0         # nettoyage AVANT brassage (doit précéder l'ouverture du batch)
+_BREW_AT = 5.0        # ouverture du brassage (= ouverture du batch)
+_INCIDENT_AT = 60.0   # début de l'incident (cuves stabilisées à leur cible)
+_RECOVER_AT = 300.0   # retour à la normale (déviation ~240 s, bien au-delà du seuil)
+_STOP_AT = 350.0      # fin de poste (= clôture du batch, verdict calculé)
+
+# Catalogue : nom de scénario -> (ligne) -> étapes d'incident. "nominal" = aucun
+# incident (batch conforme). Aligné avec les verdicts de brain.py.
+SCENARIOS: dict[str, Callable[[str], list[Step]]] = {
+    "nominal": lambda line: [],
+    "fermentation_hors_spec": lambda line: [
+        Step(_INCIDENT_AT, f"🌡️  Emballement du fermenteur {line} (+8°C) → fermentation hors spec",
+             nudge_temp(line, "fermenteur", 8.0)),
+        Step(_RECOVER_AT, f"🔧 Recalage du fermenteur {line}",
+             nudge_temp(line, "fermenteur", -8.0)),
+    ],
+    "rendement_faible": lambda line: [
+        Step(_INCIDENT_AT, f"🥵 Coup de chaud sur l'empâteur {line} (+10°C) → enzymes dénaturées",
+             nudge_temp(line, "empateur", 10.0)),
+        Step(_RECOVER_AT, f"❄️  Refroidissement de l'empâteur {line}",
+             nudge_temp(line, "empateur", -10.0)),
+    ],
+    "volume_insuffisant": lambda line: [
+        Step(_INCIDENT_AT, f"💥 Panne de l'embouteilleuse {line} → débit à l'arrêt",
+             trip_bottler(line)),
+        Step(_RECOVER_AT, f"🔧 Embouteilleuse {line} réparée et relancée",
+             repair_bottler(line)),
+    ],
+    # Cause NON thermique : temp nominale, mais nettoyage écourté → contamination.
+    # C'est le cas qui force l'assistant à DISCRIMINER (écarter la piste thermique).
+    "contamination": lambda line: [
+        Step(_CIP_AT, f"🧽 CIP écourté sur la ligne {line} → risque de contamination",
+             skip_cip(line)),
+    ],
+    # Dérive LENTE (groupe froid qui faiblit) : même verdict que S1 (fermentation hors
+    # spec) mais la timeline raconte une montée graduelle, détectée tard.
+    "derive_lente": lambda line: [
+        Step(_INCIDENT_AT, f"📉 Dérive lente du fermenteur {line} (+1.5 °C/min) → détection tardive",
+             drift_temp(line, "fermenteur", 1.5)),
+        Step(_RECOVER_AT, f"🔧 Dérive du fermenteur {line} stoppée",
+             drift_temp(line, "fermenteur", 0.0)),
+    ],
+}
+
+# Rotation des cycles : chaque entrée = {ligne: scénario} pour un cycle. On varie
+# pour accumuler des batchs aux verdicts différents (dont des batchs conformes). Une
+# ligne absente d'un plan = nominale (brew_all/stop_all démarrent toutes les lignes).
+CYCLE_PLANS: list[dict[str, str]] = [
+    {"ipa": "fermentation_hors_spec"},
+    {"blonde": "rendement_faible"},
+    {"ipa": "volume_insuffisant"},
+    {"ipa": "contamination"},
+    {"blonde": "derive_lente"},
+    {"jalapeno": "rendement_faible"},
+    {},  # cycle tout-nominal
+]
+
+
+def single_plan(scenario: str, line: str = "ipa") -> list[dict[str, str]]:
+    """Rotation à un seul plan : force `scenario` sur `line` à chaque cycle (mode
+    déclenché). Les autres lignes restent nominales (absentes du plan)."""
+    return [{line: scenario}]
 
 
 class ScenarioRunner:
-    """Applique un scénario en boucle au fil du temps simulé."""
+    """Déroule une ROTATION de scénarios : à chaque cycle, reconstruit les étapes
+    (ouverture → incidents par ligne → clôture) selon le plan du cycle courant."""
 
-    def __init__(self, steps: list[Step], cycle_seconds: float,
+    def __init__(self, cycle_plans: list[dict[str, str]], cycle_seconds: float,
                  log: Callable[[str], None] = print) -> None:
-        self.steps = sorted(steps, key=lambda s: s.at)
+        self.plans = cycle_plans or [{}]
         self.cycle = cycle_seconds
         self.log = log
         self._elapsed = 0.0
+        self._cycle_idx = 0
         self._next_idx = 0
+        self.steps = self._build_cycle(0)
+
+    def _build_cycle(self, idx: int) -> list[Step]:
+        plan = self.plans[idx % len(self.plans)]
+        steps = [Step(_BREW_AT, "🍺 Ouverture : lancement du brassage", brew_all())]
+        for line, scenario in plan.items():
+            builder = SCENARIOS.get(scenario)
+            if builder:
+                steps.extend(builder(line))
+            else:
+                self.log(f"[scénario] inconnu: {scenario!r} (ligne {line}) — ignoré")
+        steps.append(Step(_STOP_AT, "🌙 Fin de poste : arrêt et clôture des batchs", stop_all()))
+        return sorted(steps, key=lambda s: s.at)
 
     def tick(self, brewery: Brewery, dt: float) -> None:
         self._elapsed += dt
@@ -107,4 +192,7 @@ class ScenarioRunner:
         if self._elapsed >= self.cycle:
             self._elapsed = 0.0
             self._next_idx = 0
-            self.log("[scénario] —— nouvelle journée de brassage ——")
+            self._cycle_idx += 1
+            self.steps = self._build_cycle(self._cycle_idx)
+            plan = self.plans[self._cycle_idx % len(self.plans)]
+            self.log(f"[scénario] —— nouvelle journée — plan: {plan} ——")

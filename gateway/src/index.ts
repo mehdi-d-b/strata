@@ -32,6 +32,8 @@ import {
 } from "./auth.js";
 import { deployDevice, undeployDevice } from "./plc4x.js";
 import { AlarmEngine } from "./alarms.js";
+import { BatchTracker } from "./batches.js";
+import { runAssistant, getPending, consumePending, type ChatMessage } from "./assistant.js";
 
 const KAFKA_BROKERS = (process.env.KAFKA_BROKERS ?? "redpanda:9092").split(",");
 const PG_DSN =
@@ -179,6 +181,8 @@ async function audit(
 
 // Moteur d'alarmes (détection de seuils sur tags.raw). Démarré dans main().
 const alarmEngine = new AlarmEngine(pool, audit);
+// Suivi des batchs (persistance ouverture/clôture depuis les tags <ligne>.batch.*).
+const batchTracker = new BatchTracker(pool, audit);
 
 // Sur chaque requête : résout l'utilisateur courant depuis le cookie de session.
 app.addHook("preHandler", async (req) => {
@@ -510,6 +514,29 @@ app.post("/api/alarms/:id/ack", { preHandler: requireAuth }, async (req, reply) 
   return rows[0];
 });
 
+// ─── Batchs — consultation (requireAuth) ──────────────────────────────────
+// Généalogie de batch : derniers brassages avec leur verdict QC. Base de
+// get_batch_context (assistant). Filtrable par recette (?recipe=ipa).
+app.get("/api/batches", { preHandler: requireAuth }, async (req) => {
+  const q = req.query as { recipe?: string; limit?: string };
+  const limit = Math.min(200, Number(q.limit) || 50);
+  const params: unknown[] = [];
+  let where = "";
+  if (q.recipe) {
+    params.push(q.recipe);
+    where = `WHERE recipe = $${params.length}`;
+  }
+  params.push(limit);
+  const { rows } = await pool.query(
+    `SELECT id, recipe, line, started_at, ended_at, status,
+            qc_verdict, defaut_type, rebut_pct, qc_notes
+     FROM batches ${where}
+     ORDER BY started_at DESC LIMIT $${params.length}`,
+    params,
+  );
+  return rows;
+});
+
 // Historique des alarmes (pour plus tard).
 app.get("/api/alarms/history", { preHandler: requireAuth }, async (req) => {
   const q = req.query as { from?: string; to?: string; limit?: string };
@@ -829,6 +856,78 @@ app.get("/api/oee/downtime/events", async (req) => {
     [days, q.line ?? "", minMinutes],
   );
   return rows;
+});
+
+// ─── Assistant IA local (profil `ai`, Ollama) — cf. docs/llm-integration.md ──
+// Chemin B : la boucle d'agent vit ici, les tools (lecture) s'exécutent avec le
+// contexte de l'utilisateur connecté. Le LLM ne touche jamais la base en direct.
+app.post("/api/assistant/chat", { preHandler: requireAuth }, async (req, reply) => {
+  const b = req.body as { messages?: ChatMessage[]; message?: string };
+  const history: ChatMessage[] =
+    b.messages?.length ? b.messages : b.message ? [{ role: "user", content: b.message }] : [];
+  if (!history.length) return reply.code(400).send({ error: "messages ou message requis" });
+
+  reply.raw.setHeader("Content-Type", "text/event-stream");
+  reply.raw.setHeader("Cache-Control", "no-cache");
+  reply.raw.setHeader("Connection", "keep-alive");
+  reply.raw.setHeader("X-Accel-Buffering", "no");
+
+  const send = (data: object) => {
+    reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  try {
+    const out = await runAssistant(pool, req.user, history, send);
+    await audit(req.user!.username, "assistant.chat", null, { steps: out.steps });
+  } catch (e) {
+    send({ type: "error", message: `assistant indisponible: ${(e as Error).message}` });
+  }
+  reply.raw.end();
+});
+
+// Confirmation d'une action proposée par l'assistant (Part B : propose→confirme→
+// exécute). On RE-vérifie le droit write + on audite ; le LLM n'écrit jamais seul.
+app.post("/api/assistant/confirm", { preHandler: requireAuth }, async (req, reply) => {
+  const { id } = req.body as { id?: string };
+  if (!id) return reply.code(400).send({ error: "id requis" });
+  const p = getPending(id);
+  if (!p) return reply.code(404).send({ error: "action expirée ou introuvable" });
+  if (p.username !== req.user!.username)
+    return reply.code(403).send({ error: "action proposée à un autre utilisateur" });
+  try {
+    if (p.tool === "set_command") {
+      const tag = String(p.args.tag ?? "");
+      const value = Number(p.args.value);
+      if (!tag || Number.isNaN(value)) return reply.code(400).send({ error: "consigne invalide" });
+      if (!can(req.user, "write", tag))
+        return reply.code(403).send({ error: `pas le droit d'écrire sur ${tag}` });
+      await publishCommand(tag, value, `assistant:${req.user!.username}`);
+      await audit(req.user!.username, "assistant.command", tag, { value });
+      consumePending(id);
+      return { ok: true, result: `Consigne ${value} envoyée sur ${tag}.` };
+    }
+    if (p.tool === "ack_alarm") {
+      const alarmId = String(p.args.alarm_id ?? "");
+      const { rows } = await pool.query(
+        `UPDATE alarms SET acked=true, acked_by=$2, acked_at=now() WHERE id=$1 RETURNING tag`,
+        [alarmId, req.user!.username],
+      );
+      if (rows.length === 0) return reply.code(404).send({ error: "alarme introuvable" });
+      await audit(req.user!.username, "assistant.alarm.ack", rows[0].tag);
+      consumePending(id);
+      return { ok: true, result: `Alarme ${alarmId} acquittée.` };
+    }
+    return reply.code(400).send({ error: `action non supportée: ${p.tool}` });
+  } catch (e) {
+    return reply.code(502).send({ error: (e as Error).message });
+  }
+});
+
+// Annulation d'une action proposée (l'humain refuse).
+app.post("/api/assistant/cancel", { preHandler: requireAuth }, async (req) => {
+  const { id } = req.body as { id?: string };
+  if (id) consumePending(id);
+  return { ok: true };
 });
 
 // Objectifs OEE par ligne (cible OEE + objectif de pièces/shift). Admin.
@@ -1254,6 +1353,12 @@ async function startConsumer() {
       alarmEngine.onMeasure(m.tag, value).catch((e) =>
         app.log.error(`alarme: ${(e as Error).message}`),
       );
+      // Suivi des batchs : sur la valeur BRUTE (codes/compteurs exacts, pas de scaling).
+      if (m.tag.includes(".batch.")) {
+        batchTracker.onMeasure(m.tag, m.value).catch((e) =>
+          app.log.error(`batch: ${(e as Error).message}`),
+        );
+      }
       // On pousse la valeur SCALÉE au navigateur (cohérent avec l'historique),
       // mais SEULEMENT aux clients qui ont le droit de LIRE ce tag (filtrage RBAC).
       const out = JSON.stringify({ ...m, value });

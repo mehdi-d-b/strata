@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { CommandPalette } from "@/components/CommandPalette";
 import { Toaster } from "@/components/ui/sonner";
 import { AlarmsProvider, useAlarms } from "./alarms";
+import { AssistantProvider } from "./assistant";
 
 /** Bandeau réservé aux alarmes critiques non acquittées (sinon rien). */
 function CriticalBanner() {
@@ -28,6 +29,7 @@ export function Layout() {
 
   return (
     <AlarmsProvider>
+      <AssistantProvider>
       <div className="flex min-h-screen bg-background">
         <Sidebar onSearch={() => setPaletteOpen(true)} />
         <div className="flex min-w-0 flex-1 flex-col">
@@ -39,6 +41,7 @@ export function Layout() {
         <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
         <Toaster />
       </div>
+      </AssistantProvider>
     </AlarmsProvider>
   );
 }

@@ -128,7 +128,14 @@ proprement sans lui** :
    30 s », « écart entre deux capteurs redondants > seuil ». Impossible avec le
    modèle seuil-mono-tag actuel.
 3. **OEE / KPIs live** (disponibilité × performance × qualité) recalculés en continu
-   plutôt qu'à l'ouverture de page.
+   plutôt qu'à l'ouverture de page. ⚠️ **L'OEE *batch* est déjà fait** (continuous
+   aggregates Timescale + objectifs/projection + Pareto des motifs + reclassement
+   opérateur — cf. [oee-design.md](oee-design.md)). RisingWave apporte le **live**
+   (fenêtre glissante sub-seconde) pour la **réactivité atelier** : andon, **alerte OEE
+   sous seuil** (réutilise le modèle d'alarmes `source='derived'`), capter les micro-arrêts.
+   ⚠️ *Ne vaut que si quelqu'un AGIT sur le chiffre temps réel* (opérateur/alerte) ; sinon
+   le batch suffit. C'est le **cas d'usage RisingWave #2 à regarder** (après les anomalies),
+   noté dans la roadmap (Phase 9, OEE live). « À regarder plus tard. »
 4. **Agrégats multi-échelle** instantanés (par minute / shift / jour) sans batch.
 5. **Tags dérivés** réémis dans le flux : moyennes lissées, consommations cumulées,
    rendement, prédiction simple — tous deviennent des tags normaux, affichables.

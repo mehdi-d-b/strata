@@ -236,10 +236,28 @@ rétention sans toucher au SQL »).
       RisingWave joignables ?, profils actifs). Limite assumée : la gateway ne voit que de
       l'intérieur ; le monitoring infra « vrai » reste externe (Console, Grafana).
 
-### Assistant IA (cf. docs/llm-integration.md)
-- [ ] **Serveur MCP « Strata »** wrappant l'API gateway (compte de service RBAC, lecture seule
-      d'abord) + LLM local (Ollama/vLLM) ou API. Copilote de questions → analyste d'anomalies
-      (via RisingWave) → action encadrée. **RAG = optionnel/ultérieur** (docs métier seulement).
+### Assistant IA — 100 % local (cf. docs/llm-integration.md)
+> 🧭 **Fil conducteur terrain → harness → modèle : [docs/assistant-roadmap.md](assistant-roadmap.md)**
+> (câblage = llm-integration.md ; terrain données = simulator-scenarios.md)
+- [x] **v1 — agent in-app (Chemin B)** : profil Docker `ai` (**Ollama**, modèle open-source
+      `qwen2.5:3b`), boucle d'agent dans la gateway (`POST /api/assistant/chat`) + **tools de
+      lecture** (`get_oee`, `get_production`, `list_alarms`, `get_history`) exécutés côté gateway.
+      Le LLM ne touche jamais la base (il propose des tool-calls, la gateway exécute). **Validé en
+      live** : qwen2.5:3b a appelé `get_oee` et répondu le bon chiffre (~49 s CPU). UI chat = front.
+      *Pas de MCP* (inutile en in-app) ni LangChain (boucle directe).
+- [x] **v2 — Part A : questions imprévues (text-to-SQL en bac à sable)** : tools
+      `describe_schema` (catalogue des tables de données via les grants) + `query_readonly`
+      (SELECT exécuté via rôle Postgres **read-only** `strata_ro` + transaction READ ONLY +
+      timeout + LIMIT). **Sandbox validé** (lecture données OK, auth refusée, écriture refusée).
+      ⚠️ **Bridé par le modèle local** : qwen2.5:3b sur CPU n'arrive pas à piloter le flux
+      describe→query (thrash). **Utilisable seulement avec un vrai modèle/GPU.**
+- [x] **v2 — Part B : action encadrée** (propose → confirme → exécute) : write tools
+      (`set_command`, `ack_alarm`) **interceptés** par la boucle → proposition à **confirmation
+      humaine** (`pending_action`) ; `POST /api/assistant/confirm` re-vérifie `can(write)`, exécute,
+      audite, **consomme** (one-shot). **Validé en live** (le 3B propose, l'humain confirme, l'ack
+      s'exécute). Sûr même avec un petit modèle (l'humain est le garde-fou).
+- [ ] **v2 — suite** : **streaming** (UX), **vrai modèle/GPU** (prérequis de Part A / diagnostic
+      multi-étapes), **RAG** local (pgvector + embeddings) si besoin doc métier.
 
 ### Documentation utilisateur / aide en ligne (in-app)
 But : qu'un **utilisateur non-tech** découvre **toutes** les features et **comment les utiliser**.

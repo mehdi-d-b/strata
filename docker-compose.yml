@@ -93,6 +93,7 @@ services:
   mosquitto:
     image: eclipse-mosquitto:2.0
     container_name: strata-mosquitto
+    restart: unless-stopped
     ports:
       - "1883:1883"
     volumes:
@@ -206,6 +207,9 @@ services:
       KAFKAJS_NO_PARTITIONER_WARNING: "1"
       # API REST de Kafka Connect (profil plc4x) pour déployer les connecteurs générés.
       KAFKA_CONNECT_URL: "http://kafka-connect:8083"
+      # Assistant IA local (profil `ai`) : runtime Ollama + modèle. Absent = chat désactivé.
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-qwen2.5:7b}
     ports:
       - "3001:3001"
     restart: unless-stopped
@@ -234,7 +238,23 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  # --- Assistant IA local (profil optionnel `ai`) -------------------------
+  # Runtime LLM open-source, 100% local (aucun cloud). Expose une API HTTP
+  # (compatible OpenAI sur /v1) que la gateway appelle. Le modèle se charge via
+  # `docker compose exec ollama ollama pull qwen2.5:3b`. GPU auto-détecté si dispo
+  # (souvent CPU en pratique). Démarre avec : docker compose --profile ai up -d
+  ollama:
+    image: ollama/ollama:latest
+    container_name: strata-ollama
+    profiles: ["ai"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    restart: unless-stopped
+
 volumes:
   redpanda-data:
   timescale-data:
   risingwave-data:
+  ollama-data:

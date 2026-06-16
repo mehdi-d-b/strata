@@ -20,7 +20,7 @@ import time
 from factory.brain import Brewery
 from factory.faces.command_face import CommandFace
 from factory.faces.mqtt_face import MqttFace
-from factory.scenario import CYCLE_SECONDS, DEMO_SCENARIO, ScenarioRunner
+from factory.scenario import CYCLE_PLANS, CYCLE_SECONDS, ScenarioRunner, single_plan
 
 MQTT_URL = os.environ.get("MQTT_URL", "mosquitto")
 MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
@@ -28,11 +28,16 @@ KAFKA_BROKERS = os.environ.get("KAFKA_BROKERS", "redpanda:9092")
 TICK_HZ = float(os.environ.get("TICK_HZ", "2.0"))
 SPEED = float(os.environ.get("SPEED", "1.0"))
 SCENARIO = os.environ.get("SCENARIO", "1") != "0"
+# Mode déclenché : force un seul scénario à chaque cycle (sur SCENARIO_LINE, défaut ipa).
+# Ex : SCENARIO_FORCE=volume_insuffisant. Vide = rotation normale (CYCLE_PLANS).
+SCENARIO_FORCE = os.environ.get("SCENARIO_FORCE", "").strip()
+SCENARIO_LINE = os.environ.get("SCENARIO_LINE", "ipa").strip()
 
 
 def main() -> None:
     brewery = Brewery.default()
-    runner = ScenarioRunner(DEMO_SCENARIO, CYCLE_SECONDS)
+    plans = single_plan(SCENARIO_FORCE, SCENARIO_LINE) if SCENARIO_FORCE else CYCLE_PLANS
+    runner = ScenarioRunner(plans, CYCLE_SECONDS)
     face = MqttFace(url=MQTT_URL, port=MQTT_PORT)
     face.connect()
 
@@ -40,9 +45,11 @@ def main() -> None:
     cmd_face = CommandFace(KAFKA_BROKERS, brewery.apply_command)
     cmd_face.start()
 
+    mode = "OFF" if not SCENARIO else (
+        f"forcé:{SCENARIO_FORCE}@{SCENARIO_LINE}" if SCENARIO_FORCE else "rotation")
     print(f"[sim] brasserie démarrée — MQTT {MQTT_URL}:{MQTT_PORT}, "
           f"cmd {KAFKA_BROKERS}, {TICK_HZ} Hz, vitesse x{SPEED}, "
-          f"scénario {'ON' if SCENARIO else 'OFF'}")
+          f"scénario {mode}")
 
     period = 1.0 / TICK_HZ
     dt = period * SPEED  # temps simulé par tick (accéléré si SPEED>1)

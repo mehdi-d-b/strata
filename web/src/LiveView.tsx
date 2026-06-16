@@ -61,10 +61,23 @@ function toLocalInput(d: Date): string {
   )}:${pad(d.getMinutes())}`;
 }
 
+/** Nom relatif à un préfixe de chemin → { leaf (mesure), path (chemin restant) }. */
+function relParts(name: string, prefixStr: string): { leaf: string; path: string } {
+  let rel: string;
+  if (!prefixStr) rel = name;
+  else if (name === prefixStr) rel = name.split(".").pop() ?? name;
+  else if (name.startsWith(prefixStr + ".")) rel = name.slice(prefixStr.length + 1);
+  else rel = name;
+  const i = rel.lastIndexOf(".");
+  return { leaf: i >= 0 ? rel.slice(i + 1) : rel, path: i >= 0 ? rel.slice(0, i) : "" };
+}
+
 export function LiveView() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [query, setQuery] = useState("");
+  const [prefix, setPrefix] = useState<string[]>([]);
   const [selected, setSelected] = useState<Selected[]>([]);
+  const sessionRestored = useRef(false);
   const [range, setRange] = useState<Range>(() => ({
     mode: "relative",
     sec: loadPrefs().defaultWindowSec,
@@ -83,6 +96,11 @@ export function LiveView() {
     toLocalInput(new Date(Date.now() - 3600_000)),
   );
   const [absTo, setAbsTo] = useState(() => toLocalInput(new Date()));
+
+  useEffect(() => {
+    if (!sessionRestored.current) return;
+    sessionStorage.setItem("explorer:selected", JSON.stringify(selected));
+  }, [selected]);
 
   // Refs pour les guards dans la boucle de frames (sans recréer la socket).
   const pausedRef = useRef(false);
@@ -155,6 +173,26 @@ export function LiveView() {
   }, [enabledTags, query]);
 
   const selectedTags = useMemo(() => selected.map((s) => s.tag), [selected]);
+
+  // Filtre dynamique par niveau de chemin : tags sous le préfixe courant +
+  // « dossiers » = segments suivants distincts (dérivés des tags, donc dynamiques).
+  const prefixStr = prefix.join(".");
+  const visible = useMemo(
+    () =>
+      filtered.filter(
+        (t) =>
+          prefix.length === 0 || t.name === prefixStr || t.name.startsWith(prefixStr + "."),
+      ),
+    [filtered, prefix.length, prefixStr],
+  );
+  const folders = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const t of visible) {
+      const parts = t.name.split(".");
+      if (parts.length > prefix.length) m.set(parts[prefix.length], (m.get(parts[prefix.length]) ?? 0) + 1);
+    }
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [visible, prefix.length]);
 
   // 2) Flux temps réel découplé (buffers + redraw cadencé). Toujours connecté ;
   //    les frames ne sont appliquées qu'en mode direct (cf. handleFrame).
@@ -232,6 +270,24 @@ export function LiveView() {
       ];
     });
   };
+
+  // Restaure la sélection depuis sessionStorage une fois les tags disponibles.
+  // Passe par toggleTag (même chemin que la sélection manuelle) pour garantir
+  // que l'historique est bien amorcé dans les buffers.
+  useEffect(() => {
+    if (sessionRestored.current || enabledTags.length === 0) return;
+    sessionRestored.current = true;
+    try {
+      const saved = sessionStorage.getItem("explorer:selected");
+      if (!saved) return;
+      const names = (JSON.parse(saved) as { tag: string }[]).map((s) => s.tag).filter(Boolean);
+      for (const name of names) {
+        const t = enabledTags.find((tag) => tag.name === name);
+        if (t) toggleTag(t);
+      }
+    } catch { /* sessionStorage corrompu */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabledTags]);
 
   // En direct : (re)amorce les buffers au changement de fenêtre OU à l'entrée
   // en mode direct (l'historique au-delà ayant pu être purgé du buffer).
@@ -318,18 +374,69 @@ export function LiveView() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
+
+        {/* Fil d'Ariane : filtre par niveau de chemin */}
+        <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+          <button
+            className={prefix.length === 0 ? "text-foreground" : "hover:text-foreground"}
+            onClick={() => setPrefix([])}
+          >
+            Tous
+          </button>
+          {prefix.map((seg, i) => (
+            <span key={i} className="flex items-center gap-1">
+              <span className="opacity-60">›</span>
+              <button
+                className={i === prefix.length - 1 ? "text-foreground" : "hover:text-foreground"}
+                onClick={() => setPrefix(prefix.slice(0, i + 1))}
+              >
+                {seg}
+              </button>
+            </span>
+          ))}
+        </div>
+
+        {/* Dossiers : segments suivants (clic = on descend d'un niveau) */}
+        {folders.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {folders.map(([seg, count]) => (
+              <button
+                key={seg}
+                onClick={() => setPrefix([...prefix, seg])}
+                title={`Filtrer sur ${seg}`}
+                className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {seg}
+                <span className="tabular-nums opacity-60">{count}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="tag-list">
-          {filtered.map((t) => {
+          {visible.map((t) => {
             const on = selectedTags.includes(t.name);
+            const { leaf, path } = relParts(t.name, prefixStr);
+            // Un label n'est « utile » que s'il diffère du nom (l'auto-découverte
+            // met souvent label = nom complet → sinon les 2 lignes seraient identiques).
+            const label = t.label?.trim();
+            const niceLabel = label && label !== t.name ? label : null;
+            const primary = niceLabel ?? leaf;
+            const secondary = niceLabel ? t.name : path;
             return (
               <label key={t.name} className={`tag-item ${on ? "on" : ""}`}>
                 <input type="checkbox" checked={on} onChange={() => toggleTag(t)} />
-                <span className="tag-item-label">{tagLabel(t)}</span>
+                <span className="flex min-w-0 flex-1 flex-col leading-tight">
+                  <span className="truncate">{primary}</span>
+                  {secondary && secondary !== primary && (
+                    <span className="truncate text-[11px] text-muted-foreground">{secondary}</span>
+                  )}
+                </span>
                 {t.unit && <span className="tag-item-unit">{t.unit}</span>}
               </label>
             );
           })}
-          {filtered.length === 0 && (
+          {visible.length === 0 && (
             <div className="hint" style={{ padding: 8 }}>
               Aucun tag ne correspond.
             </div>
@@ -458,6 +565,10 @@ export function LiveView() {
           {selected.length === 0 ? (
             <div className="empty-chart">
               Sélectionne un ou plusieurs tags à gauche pour tracer leurs courbes.
+            </div>
+          ) : (data[0] as number[]).length === 0 ? (
+            <div className="empty-chart">
+              Pas de données sur cette fenêtre — le simulateur tourne-t-il ?
             </div>
           ) : (
             <MultiChart

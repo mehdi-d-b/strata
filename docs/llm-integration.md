@@ -5,6 +5,82 @@
 > niveaux d'usage, la sécurité (règle d'or), et un plan d'adoption progressif.
 > Aucune implémentation n'existe encore — c'est la cible. Voir aussi la roadmap P9.
 
+## Décisions techniques actées (2026-06) — 100 % LOCAL, agent in-app
+
+Tranché : **assistant 100 % local / open-source, aucun cloud, aucun service payant.**
+
+- **Runtime** : **Ollama** (démarrer) puis **vLLM** (montée en charge) — exposent une **API
+  compatible OpenAI** (`/v1/chat/completions`). « Compatible OpenAI » = un **format de
+  requête standard de fait**, **pas** une connexion à OpenAI : tout tourne en local, aucune
+  donnée ne sort. Avantage : pas de lock-in (swap de runtime sans changer le code).
+- **Modèle** : open-weights avec **tool-calling** natif (**Qwen2.5**, Llama 3.1/3.3). Taille
+  selon le matériel (7-8B sur CPU/GPU grand public = Q&A simple ; 70B sur vrai GPU = raisonnement
+  multi-étapes fiable). ⚠️ Un petit modèle local est plus faible qu'un frontier sur les
+  enchaînements de tools → commencer par du **Q&A en lecture**.
+- **Architecture choisie = « Chemin B » (agent in-app)** : un **backend agent dans la gateway**
+  (`POST /api/assistant/chat`) qui appelle Ollama avec les tools et **exécute les tools avec la
+  session de l'utilisateur connecté** → le LLM hérite **automatiquement de son RBAC + audit**.
+  L'**UI chat = côté front** (chat dédié).
+- **Pas de MCP pour ce chemin** : MCP sert surtout aux **clients externes** (Claude Desktop,
+  Open WebUI). En in-app, les tools sont définis **dans la gateway** (appels internes) → un étage
+  et un hop en moins. MCP reste **ajoutable plus tard** si on veut exposer Strata à un client externe.
+- **Pas de LangChain** : la boucle d'agent (message → tool calls → exécution → réponse) fait
+  **~150 lignes** en TS contre l'API compatible-OpenAI. On garde le contrôle, pas de grosse
+  dépendance à breaking changes.
+- **Déploiement** : profil Docker **`ai`** (container `ollama` + l'agent dans la gateway ;
+  poids du modèle = un volume `ollama pull`). Le launcher gagne une case (cf. launcher-plan §10).
+- **RAG (plus tard, si besoin doc métier)** : **100 % local aussi** — `pgvector` (déjà ton
+  Postgres) + un modèle d'**embeddings local** (`bge-m3`, `nomic-embed-text` via Ollama).
+
+Le reste du document (règle d'or, niveaux d'usage, sécurité) **reste valable** — seul le runtime
+passe de « cloud ou local » à **local**, et on **commence sans MCP** (Chemin B).
+
+### Questions imprévues : schema-discovery + SQL en lecture seule (v2)
+
+Pour une question que les tools figés ne couvrent pas (un `SELECT` « exotique » sur
+RisingWave/Timescale), on ajoute deux tools — et **le LLM découvre le schéma en dynamique** :
+- **`describe_schema()` / `list_streams()`** → renvoie le **catalogue vivant** (MV RisingWave via
+  `SHOW MATERIALIZED VIEWS`, colonnes Timescale via `information_schema`). Le LLM **apprend** ce
+  qui existe au lieu de deviner.
+- **`query_readonly(sql)`** → le LLM écrit un `SELECT`, **la gateway l'exécute sur un rôle DB
+  READ-ONLY** (garde-fous : *SELECT only*, timeout, plafond de lignes, schémas autorisés). La
+  règle d'or tient : le LLM **propose**, la gateway est le **videur** ; jamais d'accès brut.
+
+⚠️ Écrire un SQL correct sur un schéma découvert demande un **modèle costaud** → c'est de la **v2**.
+
+**État Part A — infra FAITE & sandbox validé (mais bridé par le petit modèle)** :
+- `describe_schema` : liste les tables de données + colonnes (via les grants de `strata_ro`).
+- `query_readonly(sql)` : exécuté via **rôle Postgres `strata_ro`** (SELECT seulement, jamais
+  l'auth) + **transaction READ ONLY** + `statement_timeout` + wrap `LIMIT 500`. Défense en
+  profondeur, testée : lecture données OK / table `users` refusée / `INSERT` refusé.
+- ⚠️ **qwen2.5:3b sur CPU n'y arrive pas** (il thrashe sur le flux describe→query, contexte
+  trop court même avec `num_ctx` relevé). **Part A n'est exploitable qu'avec un vrai modèle/GPU**
+  (14B+). L'infra, elle, est prête et sûre.
+
+### Dosage v1 / v2 (et matériel)
+
+- **v1 — FAIT (validé en live)** : profil Docker `ai` (Ollama + `qwen2.5:3b`), boucle d'agent
+  dans la gateway (`POST /api/assistant/chat`, `gateway/src/assistant.ts`) + tools de **lecture
+  figés** (`get_oee`, `get_production`, `list_alarms`, `get_history`). Test : le modèle a appelé
+  `get_oee` et répondu le bon OEE (sans halluciner), ~49 s sur CPU. UI chat = côté front.
+- **v2 (quand modèle capable + vrai GPU)** : `describe_schema` + `query_readonly` (bac à sable
+  read-only), puis tools d'**action encadrée** (write via gateway + confirmation humaine).
+
+**État Part B — FAIT & validé (sûr même sur petit modèle)** : motif **propose → confirme →
+exécute**. Les write tools (`set_command`, `ack_alarm`) sont **interceptés** par la boucle (jamais
+exécutés par le modèle) → l'API renvoie une `pending_action`. Contrat front :
+- `POST /api/assistant/chat` → soit `{ answer }`, soit `{ pendingAction: { id, tool, args, summary } }`.
+- si `pendingAction` → le front montre une **carte de confirmation** (« `summary` ? [Confirmer] [Annuler] »).
+- **Confirmer** → `POST /api/assistant/confirm { id }` → re-vérifie `can(write)`, exécute, **audite**,
+  consomme l'action (one-shot) → `{ ok, result }`.
+- **Annuler** → `POST /api/assistant/cancel { id }`.
+
+Sécurité : zéro écriture autonome, RBAC re-vérifié à l'exécution, audit, action à usage unique
+(TTL 10 min). Un mauvais choix du modèle = une proposition que l'humain rejette → inoffensif.
+- **Matériel** : accélération GPU **AMD/ROCm peu fiable** hors cartes récentes (et nulle en WSL2)
+  → souvent **CPU**. OK pour valider l'archi + Q&A simple (modèle 3B), pas pour la vitesse ni le
+  text-to-SQL. Le vrai assistant = vraie machine/GPU + modèle plus gros.
+
 ## 0. La règle d'or (non négociable)
 
 **Le LLM est UN UTILISATEUR DE PLUS.** Il accède aux données et actions de Strata
