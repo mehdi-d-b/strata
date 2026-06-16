@@ -1,48 +1,60 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  CheckCircle2,
+  Bell,
   Cpu,
   Factory,
+  FlaskConical,
+  Gauge,
   LineChart,
   ShieldCheck,
   Tags as TagsIcon,
   TriangleAlert,
 } from "lucide-react";
 import {
+  api,
   fetchDevices,
+  fetchOee,
   fetchProduction,
-  fetchTags,
   userIsAdmin,
-  type Device,
+  type OeeRow,
   type ProductionRow,
-  type Tag,
 } from "./api";
 import { useAuth } from "./auth";
+import { useAlarms } from "./alarms";
 import { PageHeader } from "@/components/PageHeader";
 import { KpiCard } from "@/components/KpiCard";
 
-/** Page d'accueil : tableau de bord (KPIs + raccourcis). */
+type BatchSummary = { status: string };
+
 export function HomeView() {
   const { user } = useAuth();
   const admin = userIsAdmin(user);
+  const { counts, unacked } = useAlarms();
 
-  const [tags, setTags] = useState<Tag[]>([]);
   const [prod, setProd] = useState<ProductionRow[]>([]);
-  const [devices, setDevices] = useState<Device[]>([]);
+  const [oee, setOee] = useState<OeeRow[]>([]);
+  const [runningBatches, setRunningBatches] = useState(0);
 
   useEffect(() => {
-    fetchTags().then(setTags).catch(() => setTags([]));
     fetchProduction(1).then(setProd).catch(() => setProd([]));
-    if (admin) fetchDevices().then(setDevices).catch(() => setDevices([]));
+    fetchOee(1).then(setOee).catch(() => setOee([]));
+    api<BatchSummary[]>("/api/batches?limit=20")
+      .then((bs) => setRunningBatches(bs.filter((b) => b.status === "running").length))
+      .catch(() => setRunningBatches(0));
+    if (admin) fetchDevices().catch(() => {});
   }, [admin]);
 
-  const enabled = tags.filter((t) => t.enabled).length;
   const today = prod[0]?.day;
   const todayRows = prod.filter((r) => r.day === today);
   const ok = todayRows.reduce((s, r) => s + (r.ok ?? 0), 0);
   const scrap = todayRows.reduce((s, r) => s + (r.scrap ?? 0), 0);
   const scrapRate = ok + scrap ? ((scrap / (ok + scrap)) * 100).toFixed(1) : "—";
+
+  const oeeValues = oee.map((r) => r.oee).filter((v): v is number => v != null);
+  const oeeAvg = oeeValues.length
+    ? `${(oeeValues.reduce((a, b) => a + b, 0) / oeeValues.length * 100).toFixed(0)} %`
+    : "—";
 
   return (
     <>
@@ -52,14 +64,40 @@ export function HomeView() {
       />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiCard label="Tags actifs" value={enabled} hint={`${tags.length} au total`} icon={TagsIcon} />
-        <KpiCard label="Bonnes (aujourd'hui)" value={ok} hint="toutes lignes" tone="good" icon={CheckCircle2} />
-        <KpiCard label="Taux de rebut" value={`${scrapRate}%`} hint="aujourd'hui" tone="warn" icon={TriangleAlert} />
-        {admin && <KpiCard label="Automates" value={devices.length} hint="sources" icon={Cpu} />}
+        <KpiCard
+          label="OEE du jour"
+          value={oeeAvg}
+          hint="moyenne toutes lignes"
+          tone={oeeValues.length && oeeValues.every((v) => v >= 0.8) ? "good" : "warn"}
+          icon={Gauge}
+        />
+        <KpiCard
+          label="Batches en cours"
+          value={runningBatches}
+          hint="lignes actives"
+          icon={FlaskConical}
+        />
+        <KpiCard
+          label="Alarmes actives"
+          value={unacked}
+          hint={counts.critical > 0 ? `dont ${counts.critical} critique${counts.critical > 1 ? "s" : ""}` : "aucune critique"}
+          tone={counts.critical > 0 ? "bad" : unacked > 0 ? "warn" : "good"}
+          icon={Bell}
+        />
+        <KpiCard
+          label="Taux de rebut"
+          value={`${scrapRate} %`}
+          hint="aujourd'hui"
+          tone={Number(scrapRate) > 5 ? "bad" : Number(scrapRate) > 2 ? "warn" : "good"}
+          icon={TriangleAlert}
+        />
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Shortcut to="/explorer" title="Explorer" desc="Temps réel & historique, multi-courbes" icon={LineChart} />
+        <Shortcut to="/batches" title="Batches" desc="Suivi de production, verdicts QC" icon={FlaskConical} />
+        <Shortcut to="/alarms" title="Alarmes" desc="Actives, historique, acquittement" icon={Bell} />
+        <Shortcut to="/oee" title="OEE" desc="Disponibilité, performance, qualité" icon={Gauge} />
         <Shortcut to="/production" title="Production" desc="Par shift, qualité, rebut" icon={Factory} />
         <Shortcut to="/tags" title="Tags" desc="Configuration, unités, échelle" icon={TagsIcon} />
         {admin && (

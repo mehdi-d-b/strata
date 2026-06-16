@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Timer, XCircle } from "lucide-react";
-import { api } from "./api";
+import type uPlot from "uplot";
+import { CheckCircle2, Timer, X, XCircle } from "lucide-react";
+import { api, fetchHistoryRange } from "./api";
+import { MultiChart, type SeriesDef } from "./MultiChart";
 import { PageHeader } from "@/components/PageHeader";
 import { cn } from "@/lib/utils";
 
@@ -17,6 +19,9 @@ type Batch = {
   qc_notes: string | null;
 };
 
+const TEMP_MACHINES = ["empateur", "fermenteur", "ebullition"] as const;
+const TEMP_COLORS = ["#3b82f6", "#22c55e", "#f97316"];
+
 function lineName(line: string) {
   const seg = line.split(".").pop() ?? line;
   return seg.charAt(0).toUpperCase() + seg.slice(1);
@@ -31,6 +36,15 @@ function fmtDuration(start: string, end: string | null) {
   const min = Math.floor(ms / 60_000);
   if (min < 60) return `${min} min`;
   return `${Math.floor(min / 60)}h${String(min % 60).padStart(2, "0")}`;
+}
+
+function fmtDatetime(iso: string) {
+  return new Date(iso).toLocaleString("fr-FR", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function VerdictBadge({ verdict, status }: { verdict: string | null; status: string }) {
@@ -56,9 +70,144 @@ function VerdictBadge({ verdict, status }: { verdict: string | null; status: str
   );
 }
 
+function DetailPanel({
+  batch,
+  onClose,
+}: {
+  batch: Batch;
+  onClose: () => void;
+}) {
+  const [chartData, setChartData] = useState<uPlot.AlignedData>([[]]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    setChartData([[]]);
+    const from = batch.started_at;
+    const to = batch.ended_at ?? new Date().toISOString();
+    const tags = TEMP_MACHINES.map((m) => `${batch.line}.${m}.temperature`);
+
+    Promise.all(tags.map((t) => fetchHistoryRange(t, from, to)))
+      .then((results) => {
+        const tsSet = new Set<number>();
+        for (const r of results)
+          for (const row of r) tsSet.add(new Date(row.ts).getTime() / 1000);
+        const xs = Array.from(tsSet).sort((a, b) => a - b);
+        const pos = new Map(xs.map((t, i) => [t, i]));
+        const cols = results.map((r) => {
+          const col: (number | null)[] = new Array(xs.length).fill(null);
+          r.forEach((row) => {
+            const p = pos.get(new Date(row.ts).getTime() / 1000);
+            if (p !== undefined) col[p] = row.value;
+          });
+          return col;
+        });
+        setChartData([xs, ...cols] as uPlot.AlignedData);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [batch.id]);
+
+  const series: SeriesDef[] = TEMP_MACHINES.map((m, i) => ({
+    tag: `${batch.line}.${m}.temperature`,
+    label: m.charAt(0).toUpperCase() + m.slice(1),
+    color: TEMP_COLORS[i],
+    unit: "°C",
+    axis: "left" as const,
+  }));
+
+  const hasChart = !loading && (chartData[0] as number[]).length > 0;
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end">
+      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
+      <div className="relative z-10 flex w-full max-w-xl flex-col overflow-y-auto border-l border-border bg-card shadow-xl">
+        {/* header */}
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <div>
+            <div className="font-semibold">{lineName(batch.line)} — {recipeName(batch.recipe)}</div>
+            <div className="text-xs text-muted-foreground">{batch.id}</div>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 space-y-5 p-5">
+          {/* verdict + métriques */}
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="space-y-0.5">
+              <div className="text-xs text-muted-foreground">Verdict</div>
+              <VerdictBadge verdict={batch.qc_verdict} status={batch.status} />
+            </div>
+            {batch.rebut_pct != null && (
+              <div className="space-y-0.5">
+                <div className="text-xs text-muted-foreground">Rebut</div>
+                <div className="font-medium tabular-nums">{batch.rebut_pct.toFixed(1)} %</div>
+              </div>
+            )}
+            <div className="space-y-0.5">
+              <div className="text-xs text-muted-foreground">Début</div>
+              <div className="tabular-nums">{fmtDatetime(batch.started_at)}</div>
+            </div>
+            <div className="space-y-0.5">
+              <div className="text-xs text-muted-foreground">
+                {batch.ended_at ? "Fin" : "Durée (en cours)"}
+              </div>
+              <div className="tabular-nums">
+                {batch.ended_at ? fmtDatetime(batch.ended_at) : fmtDuration(batch.started_at, null)}
+              </div>
+            </div>
+            {batch.ended_at && (
+              <div className="space-y-0.5">
+                <div className="text-xs text-muted-foreground">Durée</div>
+                <div className="tabular-nums">{fmtDuration(batch.started_at, batch.ended_at)}</div>
+              </div>
+            )}
+            {batch.defaut_type && (
+              <div className="space-y-0.5">
+                <div className="text-xs text-muted-foreground">Type de défaut</div>
+                <div className="font-medium text-bad">{batch.defaut_type}</div>
+              </div>
+            )}
+          </div>
+
+          {batch.qc_notes && (
+            <div className="rounded-lg border border-border bg-secondary/30 p-3 text-sm text-muted-foreground">
+              {batch.qc_notes}
+            </div>
+          )}
+
+          {/* courbes température */}
+          <div>
+            <div className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Températures
+            </div>
+            {loading ? (
+              <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+                Chargement…
+              </div>
+            ) : !hasChart ? (
+              <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+                Pas de données de température.
+              </div>
+            ) : (
+              <MultiChart data={chartData} series={series} height={220} />
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function BatchesView() {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedBatch, setSelectedBatch] = useState<Batch | null>(null);
 
   const load = () =>
     api<Batch[]>("/api/batches?limit=100")
@@ -89,7 +238,11 @@ export function BatchesView() {
           </h2>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {running.map((b) => (
-              <div key={b.id} className="rounded-xl border border-border bg-card p-4">
+              <button
+                key={b.id}
+                onClick={() => setSelectedBatch(b)}
+                className="rounded-xl border border-border bg-card p-4 text-left transition hover:border-primary"
+              >
                 <div className="flex items-center justify-between">
                   <span className="font-medium">{lineName(b.line)}</span>
                   <VerdictBadge verdict={b.qc_verdict} status={b.status} />
@@ -99,7 +252,7 @@ export function BatchesView() {
                   <Timer className="size-3" />
                   {fmtDuration(b.started_at, null)}
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         </section>
@@ -134,20 +287,16 @@ export function BatchesView() {
                 {done.map((b, i) => (
                   <tr
                     key={b.id}
+                    onClick={() => setSelectedBatch(b)}
                     className={cn(
-                      "border-b border-border/50 last:border-0",
+                      "cursor-pointer border-b border-border/50 last:border-0 transition hover:bg-secondary/50",
                       i % 2 === 1 && "bg-secondary/30",
                     )}
                   >
                     <td className="px-4 py-2.5 font-medium">{lineName(b.line)}</td>
                     <td className="px-4 py-2.5 text-muted-foreground">{recipeName(b.recipe)}</td>
                     <td className="px-4 py-2.5 tabular-nums text-muted-foreground">
-                      {new Date(b.started_at).toLocaleString("fr-FR", {
-                        day: "numeric",
-                        month: "short",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                      {fmtDatetime(b.started_at)}
                     </td>
                     <td className="px-4 py-2.5 tabular-nums text-muted-foreground">
                       {fmtDuration(b.started_at, b.ended_at)}
@@ -165,6 +314,10 @@ export function BatchesView() {
           )}
         </div>
       </section>
+
+      {selectedBatch && (
+        <DetailPanel batch={selectedBatch} onClose={() => setSelectedBatch(null)} />
+      )}
     </div>
   );
 }
