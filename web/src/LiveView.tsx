@@ -76,14 +76,8 @@ export function LiveView() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [query, setQuery] = useState("");
   const [prefix, setPrefix] = useState<string[]>([]);
-  const [selected, setSelected] = useState<Selected[]>(() => {
-    try {
-      const saved = sessionStorage.getItem("explorer:selected");
-      return saved ? (JSON.parse(saved) as Selected[]) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [selected, setSelected] = useState<Selected[]>([]);
+  const sessionRestored = useRef(false);
   const [range, setRange] = useState<Range>(() => ({
     mode: "relative",
     sec: loadPrefs().defaultWindowSec,
@@ -104,6 +98,7 @@ export function LiveView() {
   const [absTo, setAbsTo] = useState(() => toLocalInput(new Date()));
 
   useEffect(() => {
+    if (!sessionRestored.current) return;
     sessionStorage.setItem("explorer:selected", JSON.stringify(selected));
   }, [selected]);
 
@@ -275,6 +270,24 @@ export function LiveView() {
       ];
     });
   };
+
+  // Restaure la sélection depuis sessionStorage une fois les tags disponibles.
+  // Passe par toggleTag (même chemin que la sélection manuelle) pour garantir
+  // que l'historique est bien amorcé dans les buffers.
+  useEffect(() => {
+    if (sessionRestored.current || enabledTags.length === 0) return;
+    sessionRestored.current = true;
+    try {
+      const saved = sessionStorage.getItem("explorer:selected");
+      if (!saved) return;
+      const names = (JSON.parse(saved) as { tag: string }[]).map((s) => s.tag).filter(Boolean);
+      for (const name of names) {
+        const t = enabledTags.find((tag) => tag.name === name);
+        if (t) toggleTag(t);
+      }
+    } catch { /* sessionStorage corrompu */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabledTags]);
 
   // En direct : (re)amorce les buffers au changement de fenêtre OU à l'entrée
   // en mode direct (l'historique au-delà ayant pu être purgé du buffer).
@@ -552,6 +565,10 @@ export function LiveView() {
           {selected.length === 0 ? (
             <div className="empty-chart">
               Sélectionne un ou plusieurs tags à gauche pour tracer leurs courbes.
+            </div>
+          ) : (data[0] as number[]).length === 0 ? (
+            <div className="empty-chart">
+              Pas de données sur cette fenêtre — le simulateur tourne-t-il ?
             </div>
           ) : (
             <MultiChart

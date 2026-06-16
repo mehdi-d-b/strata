@@ -8,6 +8,7 @@ import { AlarmsView } from "./AlarmsView";
 import { OeeView } from "./OeeView";
 import { AssistantView } from "./AssistantView";
 import { TagsView } from "./TagsView";
+import { BatchesView } from "./BatchesView";
 import { ProductionView } from "./ProductionView";
 import { AdminView } from "./AdminView";
 import { DevicesView } from "./DevicesView";
@@ -43,6 +44,7 @@ export function App() {
           <Route path="assistant" element={<AssistantView />} />
           {/* Ancien chemin -> nouveau (compat liens existants) */}
           <Route path="live" element={<Navigate to="/explorer" replace />} />
+          <Route path="batches" element={<BatchesView />} />
           <Route path="production" element={<ProductionView />} />
           <Route path="tags" element={<TagsView />} />
           <Route path="settings" element={<SettingsView />} />

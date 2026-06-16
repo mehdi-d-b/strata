@@ -93,6 +93,7 @@ services:
   mosquitto:
     image: eclipse-mosquitto:2.0
     container_name: strata-mosquitto
+    restart: unless-stopped
     ports:
       - "1883:1883"
     volumes:
