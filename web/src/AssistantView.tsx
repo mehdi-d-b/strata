@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Bot, Eraser, Send } from "lucide-react";
-import { useAssistant, type Msg } from "./assistant";
+import { Bot, ChevronDown, ChevronUp, Eraser, Send } from "lucide-react";
+import { useAssistant, type Msg, type ToolCall } from "./assistant";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -16,6 +16,33 @@ function BotAvatar() {
   return (
     <div className="grid size-7 shrink-0 place-items-center rounded-full bg-primary/15 text-primary">
       <Bot className="size-4" />
+    </div>
+  );
+}
+
+function TracePanel({ trace, total_ms }: { trace: ToolCall[]; total_ms?: number }) {
+  const [open, setOpen] = useState(false);
+  if (trace.length === 0) return null;
+  const label = `⚙ ${trace.length} appel${trace.length > 1 ? "s" : ""}${total_ms != null ? ` · ${(total_ms / 1000).toFixed(1)}s` : ""}`;
+  return (
+    <div className="mt-2 border-t border-border/40 pt-1">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1 text-[11px] text-muted-foreground/70 hover:text-muted-foreground"
+      >
+        {open ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+        {label}
+      </button>
+      {open && (
+        <div className="mt-1 space-y-0.5 font-mono text-[11px] text-muted-foreground">
+          {trace.map((t, i) => (
+            <div key={i} className="flex gap-2">
+              <span className="text-primary/60">{t.name}</span>
+              {t.ms != null && <span className="opacity-50">{t.ms}ms</span>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -36,9 +63,46 @@ function Bubble({ m }: { m: Msg }) {
         )}
       >
         {m.content}
-        {m.steps != null && m.steps > 0 && (
-          <div className="mt-1 text-[11px] opacity-60">
-            {m.steps} étape{m.steps > 1 ? "s" : ""} (appel d'outils)
+        {!isUser && !m.error && m.trace && (
+          <TracePanel trace={m.trace} total_ms={m.total_ms} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Thinking({ tools }: { tools: ToolCall[] }) {
+  return (
+    <div className="flex justify-start gap-2">
+      <BotAvatar />
+      <div className="rounded-2xl bg-secondary px-4 py-3 text-sm text-muted-foreground">
+        {tools.length === 0 ? (
+          <span className="flex items-center gap-2">
+            <span className="flex gap-1">
+              {[0, 150, 300].map((d) => (
+                <span key={d} className="size-1.5 animate-bounce rounded-full bg-muted-foreground" style={{ animationDelay: `${d}ms` }} />
+              ))}
+            </span>
+            Réflexion…
+          </span>
+        ) : (
+          <div>
+            <div className="space-y-0.5 font-mono text-[11px]">
+              {tools.map((t, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className={t.ms != null ? "text-primary/60" : "text-muted-foreground/60"}>{t.name}</span>
+                  {t.ms != null ? <span className="opacity-40">{t.ms}ms ✓</span> : <span className="opacity-40 animate-pulse">···</span>}
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 flex items-center gap-1.5">
+              <span className="flex gap-1">
+                {[0, 150, 300].map((d) => (
+                  <span key={d} className="size-1 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: `${d}ms` }} />
+                ))}
+              </span>
+              <span className="text-[11px] text-muted-foreground/50">en cours…</span>
+            </div>
           </div>
         )}
       </div>
@@ -46,28 +110,8 @@ function Bubble({ m }: { m: Msg }) {
   );
 }
 
-function Thinking() {
-  return (
-    <div className="flex justify-start gap-2">
-      <BotAvatar />
-      <div className="flex items-center gap-2 rounded-2xl bg-secondary px-4 py-3 text-sm text-muted-foreground">
-        <span className="flex gap-1">
-          {[0, 150, 300].map((d) => (
-            <span
-              key={d}
-              className="size-1.5 animate-bounce rounded-full bg-muted-foreground"
-              style={{ animationDelay: `${d}ms` }}
-            />
-          ))}
-        </span>
-        L'assistant réfléchit…
-      </div>
-    </div>
-  );
-}
-
 export function AssistantView() {
-  const { messages, busy, send, clear } = useAssistant();
+  const { messages, busy, liveTools, send, clear } = useAssistant();
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -135,7 +179,7 @@ export function AssistantView() {
               {messages.map((m, i) => (
                 <Bubble key={i} m={m} />
               ))}
-              {busy && <Thinking />}
+              {busy && <Thinking tools={liveTools} />}
             </>
           )}
         </div>

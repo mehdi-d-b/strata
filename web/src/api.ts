@@ -489,8 +489,39 @@ export const deleteOeeLine = (line: string) =>
 
 export type ChatMessage = { role: "user" | "assistant"; content: string };
 
-export const assistantChat = (messages: ChatMessage[]) =>
-  api<{ answer: string; steps: number }>("/api/assistant/chat", {
+export type AgentEvent =
+  | { type: "tool_call"; step: number; name: string }
+  | { type: "tool_result"; step: number; name: string; ms: number; result_bytes: number }
+  | { type: "answer"; answer: string; steps: number; total_ms: number }
+  | { type: "error"; message: string };
+
+export async function assistantChat(
+  messages: ChatMessage[],
+  onEvent: (e: AgentEvent) => void,
+): Promise<void> {
+  const resp = await fetch("/api/assistant/chat", {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify({ messages }),
   });
+  if (!resp.ok || !resp.body) {
+    onEvent({ type: "error", message: resp.status === 502 ? "Assistant indisponible — Ollama est-il démarré ?" : "Erreur de l'assistant." });
+    return;
+  }
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const blocks = buf.split("\n\n");
+    buf = blocks.pop() ?? "";
+    for (const block of blocks) {
+      const line = block.split("\n").find((l) => l.startsWith("data: "));
+      if (!line) continue;
+      try { onEvent(JSON.parse(line.slice(6))); } catch { /* ignore malformed */ }
+    }
+  }
+}

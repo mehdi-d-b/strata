@@ -866,13 +866,23 @@ app.post("/api/assistant/chat", { preHandler: requireAuth }, async (req, reply) 
   const history: ChatMessage[] =
     b.messages?.length ? b.messages : b.message ? [{ role: "user", content: b.message }] : [];
   if (!history.length) return reply.code(400).send({ error: "messages ou message requis" });
+
+  reply.raw.setHeader("Content-Type", "text/event-stream");
+  reply.raw.setHeader("Cache-Control", "no-cache");
+  reply.raw.setHeader("Connection", "keep-alive");
+  reply.raw.setHeader("X-Accel-Buffering", "no");
+
+  const send = (data: object) => {
+    reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
   try {
-    const out = await runAssistant(pool, req.user, history);
+    const out = await runAssistant(pool, req.user, history, send);
     await audit(req.user!.username, "assistant.chat", null, { steps: out.steps });
-    return out;
   } catch (e) {
-    return reply.code(502).send({ error: `assistant indisponible (profil ai démarré ?): ${(e as Error).message}` });
+    send({ type: "error", message: `assistant indisponible: ${(e as Error).message}` });
   }
+  reply.raw.end();
 });
 
 // Confirmation d'une action proposée par l'assistant (Part B : propose→confirme→

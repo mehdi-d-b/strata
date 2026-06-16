@@ -7,12 +7,16 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ApiError, assistantChat } from "./api";
+import { assistantChat, type AgentEvent } from "./api";
+
+export type ToolCall = { name: string; ms?: number };
 
 export type Msg = {
   role: "user" | "assistant";
   content: string;
   steps?: number;
+  total_ms?: number;
+  trace?: ToolCall[];
   error?: boolean;
 };
 
@@ -30,6 +34,7 @@ function load(): Msg[] {
 type AssistantState = {
   messages: Msg[];
   busy: boolean;
+  liveTools: ToolCall[];
   send: (text: string) => void;
   clear: () => void;
 };
@@ -44,8 +49,8 @@ const AssistantContext = createContext<AssistantState | null>(null);
 export function AssistantProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<Msg[]>(load);
   const [busy, setBusy] = useState(false);
+  const [liveTools, setLiveTools] = useState<ToolCall[]>([]);
 
-  // Refs pour que `send` (stable) voie toujours l'état courant.
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
   const busyRef = useRef(busy);
@@ -54,9 +59,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     try {
       localStorage.setItem(KEY, JSON.stringify(messages));
-    } catch {
-      /* quota / indispo : on garde au moins en mémoire */
-    }
+    } catch { /* quota */ }
   }, [messages]);
 
   const send = useCallback((text: string) => {
@@ -65,33 +68,47 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     const base: Msg[] = [...messagesRef.current, { role: "user", content }];
     setMessages(base);
     setBusy(true);
+    setLiveTools([]);
+
     const history = base
       .filter((m) => !m.error)
       .map((m) => ({ role: m.role, content: m.content }));
-    assistantChat(history)
-      .then((out) =>
-        setMessages((m) => [...m, { role: "assistant", content: out.answer, steps: out.steps }]),
-      )
-      .catch((err) =>
+
+    const traceRef: ToolCall[] = [];
+
+    assistantChat(history, (e: AgentEvent) => {
+      if (e.type === "tool_call") {
+        const tc: ToolCall = { name: e.name };
+        traceRef.push(tc);
+        setLiveTools([...traceRef]);
+      } else if (e.type === "tool_result") {
+        for (let i = traceRef.length - 1; i >= 0; i--) {
+          if (traceRef[i].name === e.name && traceRef[i].ms === undefined) { traceRef[i].ms = e.ms; break; }
+        }
+        setLiveTools([...traceRef]);
+      } else if (e.type === "answer") {
         setMessages((m) => [
           ...m,
-          {
-            role: "assistant",
-            error: true,
-            content:
-              err instanceof ApiError && err.status === 502
-                ? "Assistant indisponible — le profil IA (Ollama) est-il démarré ? (docker compose --profile ai up -d)"
-                : "Erreur de l'assistant.",
-          },
-        ]),
-      )
-      .finally(() => setBusy(false));
+          { role: "assistant", content: e.answer, steps: e.steps, total_ms: e.total_ms, trace: [...traceRef] },
+        ]);
+        setBusy(false);
+        setLiveTools([]);
+      } else if (e.type === "error") {
+        setMessages((m) => [...m, { role: "assistant", error: true, content: e.message }]);
+        setBusy(false);
+        setLiveTools([]);
+      }
+    }).catch(() => {
+      setMessages((m) => [...m, { role: "assistant", error: true, content: "Erreur de l'assistant." }]);
+      setBusy(false);
+      setLiveTools([]);
+    });
   }, []);
 
   const clear = useCallback(() => setMessages([]), []);
 
   return (
-    <AssistantContext.Provider value={{ messages, busy, send, clear }}>
+    <AssistantContext.Provider value={{ messages, busy, liveTools, send, clear }}>
       {children}
     </AssistantContext.Provider>
   );

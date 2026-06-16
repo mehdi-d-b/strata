@@ -11,8 +11,20 @@ import pg from "pg";
 import { can, type AuthUser } from "./auth.js";
 
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://ollama:11434";
+const EMBED_MODEL = process.env.EMBED_MODEL ?? "nomic-embed-text";
 const MODEL = process.env.ASSISTANT_MODEL ?? "qwen2.5:3b";
-const MAX_STEPS = 6;
+const MAX_STEPS = 10;
+
+async function embed(text: string): Promise<number[]> {
+  const resp = await fetch(`${OLLAMA_URL}/api/embed`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: EMBED_MODEL, input: text }),
+  });
+  if (!resp.ok) throw new Error(`embed error ${resp.status}`);
+  const data = (await resp.json()) as { embeddings: number[][] };
+  return data.embeddings[0];
+}
 
 export type ChatMessage = {
   role: "system" | "user" | "assistant" | "tool";
@@ -112,6 +124,19 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "search_knowledge",
+      description:
+        "Recherche dans la base de connaissances (SOPs, procédures, causes de défauts, historique d'incidents) par similarité sémantique. À utiliser quand l'opérateur cherche comment résoudre un problème, débloquer une machine, comprendre une cause racine.",
+      parameters: {
+        type: "object",
+        properties: { query: { type: "string", description: "description du problème ou question en langage naturel" } },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "set_command",
       description:
         "PROPOSE d'écrire une consigne (setpoint) sur un tag. ACTION soumise à CONFIRMATION humaine — n'exécute rien directement.",
@@ -135,6 +160,53 @@ const TOOLS = [
         properties: { alarm_id: { type: "string" } },
         required: ["alarm_id"],
       },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_line_status",
+      description:
+        "État temps réel d'une ou toutes les lignes : état de chaque machine (arrêt/marche/attente), température, alarmes actives, batch en cours. À utiliser pour savoir ce qui tourne, ce qui est bloqué, ce qui est en panne.",
+      parameters: {
+        type: "object",
+        properties: {
+          line: { type: "string", description: "préfixe de ligne ex 'brasserie.blonde' (optionnel, toutes les lignes si absent)" },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_shift_summary",
+      description:
+        "Résumé complet du shift en cours : OEE et production par ligne, batches actifs, nombre d'alarmes non acquittées. Vue d'ensemble pour savoir comment se passe la journée.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_oee_breakdown",
+      description:
+        "OEE décomposé en Disponibilité, Performance et Qualité par ligne, avec les principales causes de perte. Utile pour diagnostiquer pourquoi l'OEE est bas.",
+      parameters: {
+        type: "object",
+        properties: {
+          days: { type: "integer", description: "fenêtre en jours (défaut 1 = aujourd'hui)" },
+          line: { type: "string", description: "préfixe de ligne (optionnel)" },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_active_batches",
+      description:
+        "Liste tous les batches actuellement en cours (non terminés) avec leur recette, ligne, durée écoulée et phase estimée.",
+      parameters: { type: "object", properties: {} },
     },
   },
 ];
@@ -451,15 +523,186 @@ async function execTool(pool: pg.Pool, user: AuthUser | null, name: string, args
         client.release();
       }
     }
+    case "search_knowledge": {
+      const query = String(args.query ?? "").trim();
+      if (!query) return JSON.stringify({ error: "query requis" });
+      const vec = await embed(query);
+      const { rows } = await pool.query(
+        `SELECT category, title, body,
+                1 - (embedding <=> $1::vector) AS score
+         FROM knowledge
+         WHERE embedding IS NOT NULL
+         ORDER BY embedding <=> $1::vector
+         LIMIT 5`,
+        [`[${vec.join(",")}]`],
+      );
+      if (rows.length === 0) return JSON.stringify({ message: "Aucun document trouvé dans la base de connaissances." });
+      return JSON.stringify(rows.map((r) => ({ category: r.category, title: r.title, body: r.body, score: Number(r.score).toFixed(3) })));
+    }
+    case "get_line_status": {
+      const lineFilter = args.line ? String(args.line) : null;
+      const lines = await pool.query(
+        `SELECT line, label FROM oee_line WHERE enabled = true ${lineFilter ? "AND line = $1" : ""} ORDER BY line`,
+        lineFilter ? [lineFilter] : [],
+      );
+      const result = await Promise.all(
+        lines.rows.map(async (l) => {
+          // Dernier état de chaque machine (state, en_attente, temperature)
+          const { rows: tagRows } = await pool.query(
+            `SELECT DISTINCT ON (tag) tag, value, ts
+             FROM mesures
+             WHERE tag LIKE $1 AND (tag LIKE '%.state' OR tag LIKE '%.en_attente' OR tag LIKE '%.temperature')
+             ORDER BY tag, ts DESC`,
+            [`${l.line}.%`],
+          );
+          // Machines distinctes (celles qui ont un .state)
+          const machines: Record<string, Record<string, unknown>> = {};
+          for (const r of tagRows) {
+            const parts = r.tag.split(".");
+            const machine = parts[2];
+            const mesure = parts.slice(3).join(".");
+            if (!machines[machine]) machines[machine] = {};
+            if (mesure === "state") machines[machine].state = r.value === 1 ? "marche" : "arrêt";
+            else if (mesure === "en_attente") machines[machine].en_attente = r.value === 1;
+            else if (mesure === "temperature") machines[machine].temperature = Number(r.value).toFixed(1);
+          }
+          // Batch en cours
+          const { rows: batchRows } = await pool.query(
+            `SELECT id, recipe FROM batches WHERE line = $1 AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1`,
+            [l.line],
+          );
+          // Alarmes actives
+          const { rows: alarmRows } = await pool.query(
+            `SELECT count(*)::int AS n FROM alarms WHERE tag LIKE $1 AND (state='active' OR (state='cleared' AND acked=false))`,
+            [`${l.line}.%`],
+          );
+          // Statut synthétique par machine (marche/attente/arrêt)
+          const machineList = Object.entries(machines).map(([name, m]) => ({
+            name,
+            etat: m.en_attente ? "attente" : m.state,
+            temperature: m.temperature ?? null,
+          }));
+          return {
+            line: l.line,
+            label: l.label,
+            machines: machineList,
+            batch_en_cours: batchRows[0]?.id ?? null,
+            alarmes_non_acquittees: alarmRows[0]?.n ?? 0,
+          };
+        }),
+      );
+      return JSON.stringify(result);
+    }
+    case "get_shift_summary": {
+      const { rows: oeeRows } = await pool.query(
+        `SELECT line, line_label, shift_label, ok, produced, oee, availability, performance, quality,
+                target_oee, target_pieces, is_current
+         FROM oee_by_shift WHERE is_current = true ORDER BY line`,
+      );
+      const { rows: batchRows } = await pool.query(
+        `SELECT id, recipe, line, started_at FROM batches WHERE ended_at IS NULL ORDER BY started_at DESC`,
+      );
+      const { rows: alarmRows } = await pool.query(
+        `SELECT count(*)::int AS n FROM alarms WHERE state='active' OR (state='cleared' AND acked=false)`,
+      );
+      return JSON.stringify({
+        shift: oeeRows[0]?.shift_label ?? "inconnu",
+        lignes: oeeRows.map((r) => ({
+          line: r.line,
+          label: r.line_label,
+          oee: r.oee != null ? Number(r.oee).toFixed(3) : null,
+          disponibilite: r.availability != null ? Number(r.availability).toFixed(3) : null,
+          performance: r.performance != null ? Number(r.performance).toFixed(3) : null,
+          qualite: r.quality != null ? Number(r.quality).toFixed(3) : null,
+          ok: r.ok,
+          produit: r.produced,
+          objectif_pieces: r.target_pieces,
+          objectif_oee: r.target_oee,
+        })),
+        batches_en_cours: batchRows.map((r) => ({ id: r.id, recipe: r.recipe, line: r.line })),
+        alarmes_non_acquittees: alarmRows[0]?.n ?? 0,
+      });
+    }
+    case "get_oee_breakdown": {
+      const days = Math.min(Number(args.days ?? 1) || 1, 30);
+      const lineFilter = args.line ? String(args.line) : null;
+      const { rows: oeeRows } = await pool.query(
+        `SELECT line, line_label, day, shift_label, ok, produced,
+                availability, performance, quality, oee,
+                target_oee, on_track
+         FROM oee_by_shift
+         WHERE day > (now() - ($1 || ' days')::interval)::date
+           ${lineFilter ? "AND line = $2" : ""}
+         ORDER BY line, day DESC, shift_label`,
+        lineFilter ? [days, lineFilter] : [days],
+      );
+      const { rows: lossRows } = await pool.query(
+        `SELECT line, reason_code, reason_label, kind, sum(minutes)::int AS minutes_perdues
+         FROM oee_downtime_by_shift
+         WHERE day > (now() - ($1 || ' days')::interval)::date
+           ${lineFilter ? "AND line = $2" : ""}
+         GROUP BY line, reason_code, reason_label, kind
+         ORDER BY line, minutes_perdues DESC`,
+        lineFilter ? [days, lineFilter] : [days],
+      );
+      const lossByLine: Record<string, typeof lossRows> = {};
+      for (const r of lossRows) (lossByLine[r.line] ??= []).push(r);
+
+      // Agrégation par ligne
+      const byLine: Record<string, { shifts: typeof oeeRows; pertes: typeof lossRows }> = {};
+      for (const r of oeeRows) (byLine[r.line] ??= { shifts: [], pertes: [] }).shifts.push(r);
+      for (const [line, pertes] of Object.entries(lossByLine)) {
+        if (byLine[line]) byLine[line].pertes = pertes;
+      }
+      const summary = Object.entries(byLine).map(([line, d]) => {
+        const last = d.shifts[0];
+        return {
+          line,
+          label: last?.line_label,
+          oee: last?.oee != null ? Number(last.oee).toFixed(3) : null,
+          disponibilite: last?.availability != null ? Number(last.availability).toFixed(3) : null,
+          performance: last?.performance != null ? Number(last.performance).toFixed(3) : null,
+          qualite: last?.quality != null ? Number(last.quality).toFixed(3) : null,
+          objectif_oee: last?.target_oee,
+          principales_pertes: d.pertes.slice(0, 5).map((p) => ({
+            raison: p.reason_label ?? p.reason_code,
+            type: p.kind,
+            minutes: p.minutes_perdues,
+          })),
+        };
+      });
+      return JSON.stringify(summary);
+    }
+    case "get_active_batches": {
+      const { rows } = await pool.query(
+        `SELECT id, recipe, line,
+                started_at,
+                EXTRACT(EPOCH FROM (now() - started_at)) / 3600 AS duree_heures,
+                defaut_type, conforme
+         FROM batches
+         WHERE ended_at IS NULL
+         ORDER BY started_at DESC`,
+      );
+      if (rows.length === 0) return JSON.stringify({ message: "Aucun batch en cours." });
+      return JSON.stringify(
+        rows.map((r) => ({
+          id: r.id,
+          recipe: r.recipe,
+          line: r.line,
+          duree_heures: Number(r.duree_heures).toFixed(1),
+          defaut_type: r.defaut_type ?? null,
+          conforme: r.conforme,
+        })),
+      );
+    }
     default:
       return JSON.stringify({ error: `tool inconnu: ${name}` });
   }
 }
 
-const SYSTEM_PROMPT =
-  "Tu es l'assistant de Strata, une plateforme de supervision de données industrielles " +
-  "(démo : une micro-brasserie avec 3 lignes : blonde, ipa et jalapeno). Réponds en français, de façon " +
-  "concise et PRÉCISE : réponds exactement à la question posée, sans analyse, résumé ni " +
+const SYSTEM_PROMPT_STATIC =
+  "Tu es l'assistant de Strata, une plateforme de supervision de données industrielles. " +
+  "Réponds en français, de façon concise et PRÉCISE : réponds exactement à la question posée, sans analyse, résumé ni " +
   "recommandations non demandés. Si on demande une seule chose (la dernière alarme, un chiffre…), " +
   "donne juste ça. Pour toute donnée chiffrée (OEE, production, alarmes, mesures), utilise TOUJOURS les " +
   "tools — n'invente jamais de valeurs. Si une donnée n'est pas disponible via un tool, dis-le. " +
@@ -473,21 +716,71 @@ const SYSTEM_PROMPT =
   "déviation thermique). Une cuve n'est hors bande QUE si elle figure dans `cuves_hors_bande` (liste vide " +
   "= aucune déviation thermique, n'accuse alors AUCUNE cuve) ; ne déduis jamais une déviation toi-même en " +
   "comparant des nombres. " +
-  "Pour une question non couverte par get_oee/get_production/list_alarms/get_history/get_batch_context, utilise " +
-  "describe_schema (pour voir les tables/colonnes) puis query_readonly avec un SELECT PostgreSQL " +
-  "en lecture seule (un seul SELECT, sans point-virgule). " +
-  "Pour AGIR (écrire une consigne, acquitter une alarme), utilise set_command / ack_alarm : " +
-  "ce sont des PROPOSITIONS soumises à confirmation humaine — tu n'exécutes jamais directement.";
+  "Pour toute question commençant par 'comment', 'que faire', 'quoi faire', 'comment réagir', 'comment débloquer', " +
+  "'quelle procédure', ou demandant une recommandation / un plan d'action : appelle search_knowledge EN PREMIER " +
+  "avec la description du problème. Ne commence PAS par investiguer les tags ou les alarmes — la connaissance " +
+  "procédurale est dans search_knowledge. Tu peux ensuite compléter avec les données en temps réel si nécessaire. " +
+  "Pour investiguer l'état d'une machine ou diagnostiquer un problème opérationnel, enchaîne librement " +
+  "les tools : list_alarms (alarmes actives/non acquittées), get_history (tendance d'un tag), " +
+  "describe_schema + query_readonly (SQL libre en lecture seule). " +
+  "Pour AGIR (écrire une consigne, acquitter une alarme), utilise set_command / ack_alarm UNIQUEMENT " +
+  "si l'opérateur demande explicitement d'effectuer une action — jamais pour répondre à une question " +
+  "sur la procédure à suivre. Ces actions sont des PROPOSITIONS soumises à confirmation humaine.";
+
+async function buildFactoryContext(pool: pg.Pool): Promise<string> {
+  const [lines, machines, recipes] = await Promise.all([
+    pool.query("SELECT line, label, ideal_rate FROM oee_line WHERE enabled = true ORDER BY line"),
+    pool.query(`
+      SELECT split_part(name,'.', 1)||'.'||split_part(name,'.', 2) AS line,
+             split_part(name, '.', 3) AS machine
+      FROM tags
+      WHERE enabled = true
+        AND array_length(string_to_array(name, '.'), 1) = 4
+        AND split_part(name, '.', 4) = 'state'
+      ORDER BY 1, 2`),
+    pool.query("SELECT DISTINCT recipe FROM batches ORDER BY recipe"),
+  ]);
+
+  const machinesByLine = new Map<string, string[]>();
+  for (const r of machines.rows) {
+    if (!machinesByLine.has(r.line)) machinesByLine.set(r.line, []);
+    machinesByLine.get(r.line)!.push(r.machine);
+  }
+
+  const linesText = lines.rows
+    .map((r) => {
+      const machs = (machinesByLine.get(r.line) ?? []).join(", ");
+      return `  • ${r.line} (${r.label}, cadence ${r.ideal_rate} pièces/min) — machines : ${machs}`;
+    })
+    .join("\n");
+
+  const recipesText = recipes.rows.map((r) => r.recipe).join(", ");
+
+  return (
+    "CONTEXTE USINE (extrait dynamiquement de la base) :\n" +
+    "Lignes actives :\n" + linesText + "\n" +
+    "Recettes connues : " + recipesText + "\n" +
+    "Convention tags : <site>.<ligne>.<machine>.<mesure>\n" +
+    "États machines : <machine>.state → 0=arrêt, 1=marche ; <machine>.en_attente → 1=bloqué amont\n" +
+    "Pour connaître les tags exacts d'une machine, utilise describe_schema ou query_readonly sur la table `tags`."
+  );
+}
 
 /** Boucle d'agent : appelle le LLM, exécute les tools demandés, jusqu'à la réponse. */
 function agentLog(runId: string, event: Record<string, unknown>) {
   console.log(JSON.stringify({ agent: true, run: runId, ...event }));
 }
 
+export type AgentEvent =
+  | { type: "tool_call"; step: number; name: string }
+  | { type: "tool_result"; step: number; name: string; ms: number; result_bytes: number }
+  | { type: "answer"; answer: string; steps: number; total_ms: number };
+
 export async function runAssistant(
   pool: pg.Pool,
   user: AuthUser | null,
   history: ChatMessage[],
+  onEvent?: (e: AgentEvent) => void,
 ): Promise<{ answer?: string; pendingAction?: PendingAction; steps: number }> {
   const username = user?.username ?? "anonymous";
   const runId = randomUUID().slice(0, 8);
@@ -495,6 +788,11 @@ export async function runAssistant(
 
   const userMsg = history.filter((m) => m.role === "user").at(-1)?.content ?? "";
   agentLog(runId, { event: "start", user: username, history_turns: history.length, question: userMsg.slice(0, 120) });
+
+  const factoryContext = await buildFactoryContext(pool).catch(() => "");
+  const systemPrompt = factoryContext
+    ? `${SYSTEM_PROMPT_STATIC}\n\n${factoryContext}`
+    : SYSTEM_PROMPT_STATIC;
 
   // Nettoie l'historique reçu du front (persistance) : on ne garde que des tours
   // user/assistant à contenu non vide, on borne la longueur. Évite qu'un message
@@ -506,7 +804,7 @@ export async function runAssistant(
     .slice(-20)
     .map((m) => ({ role: m.role, content: m.content }));
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const messages: any[] = [{ role: "system", content: SYSTEM_PROMPT }, ...clean];
+  const messages: any[] = [{ role: "system", content: systemPrompt }, ...clean];
 
   for (let step = 0; step < MAX_STEPS; step++) {
     // API NATIVE Ollama (/api/chat) : elle honore `num_ctx` (l'endpoint /v1 compatible
@@ -540,8 +838,6 @@ export async function runAssistant(
         const wargs = toArgs(writeCall.function?.arguments);
         const pendingAction = await addPending(pool, username, writeCall.function?.name ?? "", wargs);
         agentLog(runId, { event: "done", steps: step + 1, ms: Date.now() - t0, outcome: "write_intercepted", tool: writeCall.function?.name });
-        // On renvoie AUSSI un texte : un front qui ne gère pas encore pendingAction
-        // affiche au moins la proposition (au lieu d'un message vide).
         return {
           answer: `Je propose d'${pendingAction.summary} — à confirmer pour exécuter.`,
           pendingAction,
@@ -550,24 +846,32 @@ export async function runAssistant(
       }
       messages.push(msg);
       for (const tc of msg.tool_calls) {
+        const name = tc.function?.name ?? "";
         const args = toArgs(tc.function?.arguments);
+        onEvent?.({ type: "tool_call", step, name });
         const tTool = Date.now();
         let result: string;
         try {
-          result = await execTool(pool, user, tc.function?.name, args);
+          result = await execTool(pool, user, name, args);
         } catch (e) {
           result = JSON.stringify({ error: (e as Error).message });
         }
-        agentLog(runId, { event: "tool", step, name: tc.function?.name, args, result_bytes: result.length, ms: Date.now() - tTool });
-        // API native Ollama : message tool = { role, content } (pas de tool_call_id).
+        const toolMs = Date.now() - tTool;
+        agentLog(runId, { event: "tool", step, name, args, result_bytes: result.length, ms: toolMs });
+        onEvent?.({ type: "tool_result", step, name, ms: toolMs, result_bytes: result.length });
         messages.push({ role: "tool", content: result });
       }
       continue;
     }
     const answer = msg.content?.trim() || "(je n'ai pas su formuler de réponse — peux-tu reformuler ?)";
-    agentLog(runId, { event: "done", steps: step + 1, ms: Date.now() - t0, outcome: "answer", answer_chars: answer.length });
+    const total_ms = Date.now() - t0;
+    agentLog(runId, { event: "done", steps: step + 1, ms: total_ms, outcome: "answer", answer_chars: answer.length });
+    onEvent?.({ type: "answer", answer, steps: step + 1, total_ms });
     return { answer, steps: step };
   }
-  agentLog(runId, { event: "done", steps: MAX_STEPS, ms: Date.now() - t0, outcome: "max_steps" });
-  return { answer: "(j'ai atteint la limite d'étapes ; reformule peut-être ta question)", steps: MAX_STEPS };
+  const answer = "(j'ai atteint la limite d'étapes ; reformule peut-être ta question)";
+  const total_ms = Date.now() - t0;
+  agentLog(runId, { event: "done", steps: MAX_STEPS, ms: total_ms, outcome: "max_steps" });
+  onEvent?.({ type: "answer", answer, steps: MAX_STEPS, total_ms });
+  return { answer, steps: MAX_STEPS };
 }
