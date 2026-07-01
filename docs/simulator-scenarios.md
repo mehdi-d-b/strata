@@ -230,3 +230,14 @@ Tous les scénarios tournent en **rotation** (`CYCLE_PLANS`) — un défaut net 
 > Suite logique côté assistant (hors de ce doc) : `get_batch_context` → puis le workflow RCA
 > routé. Le réglage fin du raisonnement attendra un GPU + un modèle plus gros ; toute la
 > plomberie (et la vérité terrain ci-dessus) se construit et se teste dès maintenant.
+
+## Addendum — dérive lente d'équipement (orthogonale à S1-S5)
+
+Les scénarios S1-S5 ci-dessus restent scellés/complets tels quels — ils sont **scopés à un batch**
+(verdict QC à la clôture). Un tag `brasserie.<recette>.embouteilleuse.vibration`
+(`simulator/factory/brain.py`, classe `Bottler`) modélise en plus une **usure mécanique toujours
+active**, indépendante de la rotation des scénarios et persistante entre batches (contrairement à
+`Vessel.drift_rate`, remis à zéro à chaque ouverture de batch) : elle s'accumule tant que le moteur
+tourne, sur plusieurs cycles, avant une auto-réparation (retour à zéro). Aucune consigne n'est
+associée à ce tag — c'est le cas de test du mode **self-baseline** de `alarm_rules`
+(`gateway/src/alarms.ts`), pas un 6ᵉ scénario avec verdict QC.
