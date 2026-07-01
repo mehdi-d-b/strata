@@ -136,10 +136,14 @@ Architecture **cerveau / faces** conçue pour accueillir les vraies faces en P6 
         d'alarmes `source='derived'`), capter les micro-arrêts que les buckets 15 min lissent.
         À distinguer du **batch** actuel (reporting manager). ⚠️ *Ne vaut que si quelqu'un AGIT*
         *sur le chiffre temps réel* (opérateur / alerte / andon) ; sinon le batch suffit.
-- [ ] **Prévision de séries — TimesFM** (Google). Service Python séparé : lit l'historique
-      (`/api/history` ou Timescale en lecture), réinjecte les prévisions comme tags
-      `source: forecast` (ex `...temperature.forecast`) → absorbés par le contrat `tags.raw`,
-      affichés à côté du réel. Aucune refonte. Lourd (modèle de fondation JAX), inférence batch.
+- [x] **Prévision de séries — TimesFM (essayé, abandonné, 2026-07)**. Implémenté (service Python
+      natif Mac, prévision +30 min affichée dans le panel batch), puis retiré après évaluation :
+      trop de moyennage (bucket SQL avant l'inférence), modèle zero-shot univarié aveugle à la
+      consigne (donc incapable de suivre un changement de setpoint), et courbe figée +30 min peu
+      lisible/actionnable. Aucun cas d'usage identifié qui ne soit pas déjà mieux couvert, sans
+      dépendance lourde ni GPU, par le mode bande de `alarm_rules` (écart à la consigne, cf.
+      `docs/infra-architecture.md` §3) ou par un calcul déterministe depuis la recette (ETA vers
+      la consigne). La branche `feat/forecaster` a été supprimée — jamais mergée dans `main`.
 - [ ] **Assistant IA (LLM local + RAG + MCP)** — *pluggable sans refonte* grâce aux contrats
       stables (topic `tags.raw`, API REST, RBAC). Principe clé : l'IA est **un utilisateur de
       plus** → un serveur MCP « Strata » expose des tools qui appellent l'API gateway existante
