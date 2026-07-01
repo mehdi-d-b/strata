@@ -432,12 +432,26 @@ function validateRule(b: Record<string, unknown>): string | null {
   if (!ALARM_OPERATORS.includes(b.operator as string)) return "operator invalide";
   if (typeof b.threshold !== "number") return "threshold doit être un nombre";
   if (!ALARM_SEVERITIES.includes(b.severity as string)) return "severity invalide";
+  // Mode bande (optionnel) : si ref_tag est fourni, il faut une tolérance numérique.
+  // operator/threshold restent requis ci-dessus (colonnes NOT NULL) mais sont alors
+  // ignorés par AlarmEngine — cf. infra/timescale/init/15-alarm-rules-ref.sql.
+  if (b.ref_tag != null && typeof b.ref_tag !== "string") return "ref_tag doit être une chaîne";
+  if (b.ref_tag && typeof b.tolerance !== "number") return "tolerance doit être un nombre en mode bande";
+  // Mode self-baseline (optionnel) : mutuellement exclusif avec le mode bande — sinon
+  // ambiguïté silencieuse sur laquelle branche l'emporte dans AlarmEngine.
+  if (b.baseline_sigma != null && typeof b.baseline_sigma !== "number") {
+    return "baseline_sigma doit être un nombre";
+  }
+  if (b.ref_tag && b.baseline_sigma != null) {
+    return "ref_tag et baseline_sigma sont mutuellement exclusifs";
+  }
   return null;
 }
 
 app.get("/api/alarm-rules", { preHandler: requireAdmin }, async () => {
   const { rows } = await pool.query(
-    `SELECT id, tag, operator, threshold, severity, message, for_ms, hysteresis, enabled
+    `SELECT id, tag, operator, threshold, severity, message, for_ms, hysteresis, enabled,
+            ref_tag, tolerance, baseline_sigma
      FROM alarm_rules ORDER BY tag, threshold`,
   );
   return rows;
@@ -449,10 +463,10 @@ app.post("/api/alarm-rules", { preHandler: requireAdmin }, async (req, reply) =>
   if (err) return reply.code(400).send({ error: err });
   const id = randomUUID();
   const { rows } = await pool.query(
-    `INSERT INTO alarm_rules (id, tag, operator, threshold, severity, message, for_ms, hysteresis, enabled)
-     VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,0),COALESCE($8,0),COALESCE($9,true))
-     RETURNING id, tag, operator, threshold, severity, message, for_ms, hysteresis, enabled`,
-    [id, b.tag, b.operator, b.threshold, b.severity, b.message ?? null, b.for_ms, b.hysteresis, b.enabled],
+    `INSERT INTO alarm_rules (id, tag, operator, threshold, severity, message, for_ms, hysteresis, enabled, ref_tag, tolerance, baseline_sigma)
+     VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,0),COALESCE($8,0::double precision),COALESCE($9,true),$10,$11,$12)
+     RETURNING id, tag, operator, threshold, severity, message, for_ms, hysteresis, enabled, ref_tag, tolerance, baseline_sigma`,
+    [id, b.tag, b.operator, b.threshold, b.severity, b.message ?? null, b.for_ms, b.hysteresis, b.enabled, b.ref_tag ?? null, b.tolerance ?? null, b.baseline_sigma ?? null],
   );
   await alarmEngine.refresh();
   await audit(req.user!.username, "alarm-rule.create", b.tag as string);
@@ -466,10 +480,11 @@ app.put("/api/alarm-rules/:id", { preHandler: requireAdmin }, async (req, reply)
   if (err) return reply.code(400).send({ error: err });
   const { rows } = await pool.query(
     `UPDATE alarm_rules SET tag=$2, operator=$3, threshold=$4, severity=$5,
-       message=$6, for_ms=COALESCE($7,0), hysteresis=COALESCE($8,0), enabled=COALESCE($9,true)
+       message=$6, for_ms=COALESCE($7,0), hysteresis=COALESCE($8,0::double precision), enabled=COALESCE($9,true),
+       ref_tag=$10, tolerance=$11, baseline_sigma=$12
      WHERE id=$1
-     RETURNING id, tag, operator, threshold, severity, message, for_ms, hysteresis, enabled`,
-    [id, b.tag, b.operator, b.threshold, b.severity, b.message ?? null, b.for_ms, b.hysteresis, b.enabled],
+     RETURNING id, tag, operator, threshold, severity, message, for_ms, hysteresis, enabled, ref_tag, tolerance, baseline_sigma`,
+    [id, b.tag, b.operator, b.threshold, b.severity, b.message ?? null, b.for_ms, b.hysteresis, b.enabled, b.ref_tag ?? null, b.tolerance ?? null, b.baseline_sigma ?? null],
   );
   if (rows.length === 0) return reply.code(404).send({ error: "introuvable" });
   await alarmEngine.refresh();

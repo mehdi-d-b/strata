@@ -37,6 +37,16 @@ _STATE_CODE = {"stopped": 0, "running": 1, "fault": 2}
 # la régulation ; ce bruit ne s'ajoute qu'au tag publié (cf. Vessel.tags).
 _MEAS_NOISE = 0.2  # °C
 
+# Bruit de mesure du capteur de vibration (embouteilleuse) — même idiome que _MEAS_NOISE.
+_VIBRATION_NOISE = 0.05  # mm/s
+
+# Usure mécanique (roulement embouteilleuse) : dérive lente TOUJOURS ACTIVE, indépendante
+# des scénarios S1-S5 (qui sont scopés à un batch) — pour donner au mode self-baseline de
+# l'AlarmEngine (aucune consigne associée à ce tag) un vrai cas de dérive multi-cycles à
+# détecter. Constante de démo (pas une valeur physique calibrée) : durée de fonctionnement
+# CUMULÉ pour atteindre l'usure complète, avant auto-réparation (maintenance).
+_WEAR_DURATION_S = 1500.0  # 25 min de fonctionnement cumulé
+
 # Codes de verdict QC d'un batch (NUMÉRIQUES car tags.raw ne transporte que des
 # nombres). La gateway mappe ces codes vers un defaut_type texte pour la table
 # `batches`. Un verdict = RÉSULTAT QC (le batch est-il conforme, quel défaut), pas la
@@ -162,6 +172,12 @@ class Bottler:
     bottles_rebut: int = 0
     _ramp: float = 0.0
     _accum: float = 0.0
+    # Usure du roulement (dérive lente toujours active, cf. _WEAR_DURATION_S) : PAS remis
+    # à zéro à l'ouverture d'un batch (contrairement à Vessel.drift_rate) — s'accumule sur
+    # plusieurs cycles jusqu'à la maintenance auto (retour à 0).
+    vibration_base: float = 0.5   # mm/s, roulement neuf
+    vibration_gain: float = 3.0   # mm/s supplémentaires à usure complète
+    _wear: float = 0.0            # 0..1
 
     def start(self) -> None:
         if self.state != State.FAULT:
@@ -179,6 +195,12 @@ class Bottler:
 
     def tick(self, dt: float, upstream_quality: float) -> None:
         running = self.state == State.RUNNING
+        # Usure mécanique : le roulement vibre dès que le moteur tourne, même en attente
+        # amont (pas seulement quand on embouteille activement) — indépendant du batch.
+        if running:
+            self._wear += dt / _WEAR_DURATION_S
+            if self._wear >= 1.0:
+                self._wear = 0.0  # maintenance (auto-réparation)
         # On n'embouteille que si le moût amont est prêt (sinon on attend).
         self.waiting = running and upstream_quality < self.ready_threshold
         active = running and not self.waiting
@@ -200,12 +222,16 @@ class Bottler:
 
     def tags(self, prefix: str) -> dict[str, float]:
         p = f"{prefix}.{self.name}"
+        # Vibration PUBLIÉE = usure réelle + bruit de mesure (même idiome que la
+        # température, cf. Vessel.tags) — aucune consigne associée : cas self-baseline.
+        vibration = self.vibration_base + self.vibration_gain * self._wear + random.gauss(0, _VIBRATION_NOISE)
         return {
             f"{p}.state": float(_STATE_CODE[self.state.value]),
             f"{p}.cadence": self.cadence,
             f"{p}.en_attente": 1.0 if self.waiting else 0.0,
             f"{p}.bouteilles_ok": float(self.bottles_ok),
             f"{p}.bouteilles_rebut": float(self.bottles_rebut),
+            f"{p}.vibration": round(max(0.0, vibration), 3),
         }
 
 

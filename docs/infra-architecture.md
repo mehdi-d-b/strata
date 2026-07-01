@@ -77,9 +77,12 @@ Autres topics : **`tags.cmd`** (consignes d'écriture), **`tags.derived`** (sort
 | Agrégats métier **prod/shift** | **TimescaleDB** continuous aggregates (`prod_buckets` + vues, `03-production.sql`) | données **au repos**, historique, recalcul incrémental |
 | **Down-sampling** d'une grande plage d'historique | **gateway** `/api/history` (`time_bucket` à la volée, plafond `maxPoints`) | éviter d'écrouler le navigateur sur une longue plage |
 | **Alarmes par seuils** (Type A/B) | **gateway** `AlarmEngine` (`gateway/src/alarms.ts`, en mémoire) | seuils simples sur le flux, faible volume de règles |
-| **Anomalies temps réel** (z-score/dispersion, fenêtres) | **RisingWave** (profil optionnel) | données **en mouvement**, calcul riche/fenêtré |
+| **Dérive / self-baseline** (moyenne/écart-type glissants par tag) | **TimescaleDB** continuous aggregate + `AlarmEngine` (mode bande, cf. §alarm_rules) | suffit pour de la dérive (pas besoin de sub-seconde) |
+| **Anomalies vraiment temps réel** (sub-seconde, cardinalité de tags élevée) | **RisingWave** (profil optionnel, **dernier recours, non construit par défaut**) | seulement si les continuous aggregates deviennent un goulot — pas le cas aujourd'hui |
 
-Règle : **Timescale = repos, RisingWave = mouvement, gateway = orchestration + calcul simple.**
+Règle : **Timescale = repos, gateway = orchestration + calcul simple, RisingWave = dernier recours
+si un vrai besoin sub-seconde apparaît** (cf. ADR 0001 : « stream processing stateful avancé,
+différé »). Aujourd'hui, un continuous aggregate TimescaleDB fait le travail.
 
 ## 4. Arborescence du repo
 
@@ -200,8 +203,10 @@ WS (filtrage par socket). Un futur agent IA = **un utilisateur de plus** passant
 ## 10. État au 2026-06-08 (branches)
 
 - `main` : phases 0→8.5 + refonte web + alarmes + dettes (rétention/secrets/WS sécurisé) — mergé.
-- `feat/risingwave` (**pas mergé**) : anomalies temps réel (RisingWave profil optionnel, chaîne
-  validée `tags.raw→MV→tags.derived→alarms source=derived`). Voir `risingwave/README.md`.
+  RisingWave (profil optionnel `risingwave`, chaîne `tags.raw→MV→tags.derived→alarms
+  source=derived`) est **déjà dans `main`** (la branche `feat/risingwave` référencée par erreur
+  ici auparavant est en fait obsolète/dépassée) — mais reste **dernier recours, non construit par
+  défaut** : cf. §3. Voir `risingwave/README.md`.
 
 Reste ouvert (roadmap P4/P6/P9) : OPC-UA, faces protocolaires du simulateur (Modbus/S7/EIP
 serveurs), OEE complet, TimesFM (prévision), assistant IA (MCP). Tous **pluggables sans refonte**
