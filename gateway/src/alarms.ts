@@ -26,6 +26,10 @@ export type AlarmRule = {
   for_ms: number;
   hysteresis: number;
   enabled: boolean;
+  // Mode bande (si renseigné) : compare `tag` à la valeur COURANTE de `ref_tag`
+  // ± tolerance, au lieu du seuil fixe operator/threshold (ignorés dans ce cas).
+  ref_tag: string | null;
+  tolerance: number | null;
 };
 
 /** État d'évaluation en mémoire d'une règle. */
@@ -38,6 +42,9 @@ export class AlarmEngine {
   private rules: AlarmRule[] = [];
   private byTag = new Map<string, AlarmRule[]>();
   private state = new Map<string, RuleState>();
+  // Dernière valeur connue par tag, TOUS tags confondus (pas que ceux avec règle) :
+  // sert de référence live pour les règles en mode bande (ref_tag).
+  private lastValue = new Map<string, number>();
 
   constructor(
     private pool: pg.Pool,
@@ -47,7 +54,8 @@ export class AlarmEngine {
   /** Recharge les règles depuis la base (appelé périodiquement). */
   async refresh(): Promise<void> {
     const { rows } = await this.pool.query(
-      `SELECT id, tag, operator, threshold, severity, message, for_ms, hysteresis, enabled
+      `SELECT id, tag, operator, threshold, severity, message, for_ms, hysteresis, enabled,
+              ref_tag, tolerance
        FROM alarm_rules WHERE enabled`,
     );
     this.rules = rows as AlarmRule[];
@@ -74,6 +82,11 @@ export class AlarmEngine {
 
   /** Évalue la condition brute d'une règle pour une valeur. */
   private conditionMet(rule: AlarmRule, value: number): boolean {
+    if (rule.ref_tag) {
+      const refVal = this.lastValue.get(rule.ref_tag);
+      if (refVal == null) return false; // référence pas encore connue -> pas de faux positif
+      return Math.abs(value - refVal) > (rule.tolerance ?? 0);
+    }
     switch (rule.operator) {
       case ">": return value > rule.threshold;
       case ">=": return value >= rule.threshold;
@@ -91,6 +104,11 @@ export class AlarmEngine {
    */
   private clearMet(rule: AlarmRule, value: number): boolean {
     const h = rule.hysteresis || 0;
+    if (rule.ref_tag) {
+      const refVal = this.lastValue.get(rule.ref_tag);
+      if (refVal == null) return false; // référence perdue -> on ne clôt pas sur une supposition
+      return Math.abs(value - refVal) < Math.max(0, (rule.tolerance ?? 0) - h);
+    }
     switch (rule.operator) {
       case ">":
       case ">=":
@@ -104,13 +122,17 @@ export class AlarmEngine {
   }
 
   private defaultMessage(rule: AlarmRule): string {
-    return rule.message?.trim()
-      ? rule.message
+    if (rule.message?.trim()) return rule.message;
+    return rule.ref_tag
+      ? `${rule.tag} écart > ${rule.tolerance} vs ${rule.ref_tag}`
       : `${rule.tag} ${rule.operator} ${rule.threshold}`;
   }
 
   /** Traite une mesure (valeur déjà scalée) : lève/clôt les alarmes concernées. */
   async onMeasure(tag: string, value: number, now = Date.now()): Promise<void> {
+    // Mémorisé pour TOUT tag (pas seulement ceux avec règle) : sert de référence
+    // live si un autre tag a une règle en mode bande pointant vers celui-ci.
+    this.lastValue.set(tag, value);
     const rules = this.byTag.get(tag);
     if (!rules) return;
     for (const rule of rules) {

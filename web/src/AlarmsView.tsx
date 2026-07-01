@@ -256,6 +256,8 @@ const BLANK = {
   severity: "critical" as Severity,
   message: "",
   enabled: true,
+  ref_tag: "",
+  tolerance: 0,
 };
 
 function RulesSection() {
@@ -299,7 +301,12 @@ function RulesSection() {
   const add = async () => {
     if (!nu.tag.trim()) return;
     try {
-      await saveAlarmRule({ ...nu, message: nu.message || null });
+      await saveAlarmRule({
+        ...nu,
+        message: nu.message || null,
+        ref_tag: nu.ref_tag.trim() || null,
+        tolerance: nu.ref_tag.trim() ? nu.tolerance : null,
+      });
       setNu({ ...BLANK });
       load();
     } catch {
@@ -343,7 +350,9 @@ function RulesSection() {
           Plusieurs règles par tag sont possibles (ex. un <code>hi</code> et un{" "}
           <code>hihi</code>). Le message est généré si laissé vide. Import CSV/Excel —
           colonnes : <code>tag, opérateur, seuil, sévérité, message</code> (opérateur/seuil
-          vides = alarme booléenne <code>== 1</code>).
+          vides = alarme booléenne <code>== 1</code>). Mode <b>bande</b> : renseigne un tag de
+          référence (ex. une consigne) — la règle compare alors à sa valeur courante ± la
+          tolérance, et ignore opérateur/seuil.
         </>
       }
     >
@@ -353,6 +362,8 @@ function RulesSection() {
             <TableHead>Tag</TableHead>
             <TableHead>Cond.</TableHead>
             <TableHead>Seuil</TableHead>
+            <TableHead>Réf. (bande)</TableHead>
+            <TableHead>Tolérance</TableHead>
             <TableHead>Sévérité</TableHead>
             <TableHead>Message</TableHead>
             <TableHead>Actif</TableHead>
@@ -388,6 +399,23 @@ function RulesSection() {
                   className="w-24"
                   value={r.threshold}
                   onChange={(e) => patch(r.id, { threshold: Number(e.target.value) })}
+                />
+              </TableCell>
+              <TableCell>
+                <Input
+                  className="w-40"
+                  placeholder="tag de référence"
+                  value={r.ref_tag ?? ""}
+                  onChange={(e) => patch(r.id, { ref_tag: e.target.value || null })}
+                />
+              </TableCell>
+              <TableCell>
+                <Input
+                  type="number"
+                  step="any"
+                  className="w-20"
+                  value={r.tolerance ?? ""}
+                  onChange={(e) => patch(r.id, { tolerance: e.target.value === "" ? null : Number(e.target.value) })}
                 />
               </TableCell>
               <TableCell>
@@ -434,7 +462,7 @@ function RulesSection() {
           ))}
           {rules.length === 0 && (
             <TableRow>
-              <TableCell colSpan={7} className="text-muted-foreground">
+              <TableCell colSpan={9} className="text-muted-foreground">
                 Aucune règle. Ajoute-en une ci-dessous ou importe un fichier.
               </TableCell>
             </TableRow>
@@ -466,6 +494,20 @@ function RulesSection() {
           placeholder="seuil"
           value={nu.threshold}
           onChange={(e) => setNu({ ...nu, threshold: Number(e.target.value) })}
+        />
+        <Input
+          className="w-40"
+          placeholder="tag de référence (bande)"
+          value={nu.ref_tag}
+          onChange={(e) => setNu({ ...nu, ref_tag: e.target.value })}
+        />
+        <Input
+          type="number"
+          step="any"
+          className="w-20"
+          placeholder="tolérance"
+          value={nu.tolerance}
+          onChange={(e) => setNu({ ...nu, tolerance: Number(e.target.value) })}
         />
         <select
           value={nu.severity}

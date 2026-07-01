@@ -343,6 +343,10 @@ export type AlarmRule = {
   for_ms?: number;
   hysteresis?: number;
   enabled: boolean;
+  // Mode bande (optionnel) : si ref_tag est renseigné, la règle compare `tag` à la
+  // valeur COURANTE de ref_tag ± tolerance au lieu du seuil fixe operator/threshold.
+  ref_tag?: string | null;
+  tolerance?: number | null;
 };
 
 export type Alarm = {
