@@ -437,13 +437,21 @@ function validateRule(b: Record<string, unknown>): string | null {
   // ignorés par AlarmEngine — cf. infra/timescale/init/15-alarm-rules-ref.sql.
   if (b.ref_tag != null && typeof b.ref_tag !== "string") return "ref_tag doit être une chaîne";
   if (b.ref_tag && typeof b.tolerance !== "number") return "tolerance doit être un nombre en mode bande";
+  // Mode self-baseline (optionnel) : mutuellement exclusif avec le mode bande — sinon
+  // ambiguïté silencieuse sur laquelle branche l'emporte dans AlarmEngine.
+  if (b.baseline_sigma != null && typeof b.baseline_sigma !== "number") {
+    return "baseline_sigma doit être un nombre";
+  }
+  if (b.ref_tag && b.baseline_sigma != null) {
+    return "ref_tag et baseline_sigma sont mutuellement exclusifs";
+  }
   return null;
 }
 
 app.get("/api/alarm-rules", { preHandler: requireAdmin }, async () => {
   const { rows } = await pool.query(
     `SELECT id, tag, operator, threshold, severity, message, for_ms, hysteresis, enabled,
-            ref_tag, tolerance
+            ref_tag, tolerance, baseline_sigma
      FROM alarm_rules ORDER BY tag, threshold`,
   );
   return rows;
@@ -455,10 +463,10 @@ app.post("/api/alarm-rules", { preHandler: requireAdmin }, async (req, reply) =>
   if (err) return reply.code(400).send({ error: err });
   const id = randomUUID();
   const { rows } = await pool.query(
-    `INSERT INTO alarm_rules (id, tag, operator, threshold, severity, message, for_ms, hysteresis, enabled, ref_tag, tolerance)
-     VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,0),COALESCE($8,0::double precision),COALESCE($9,true),$10,$11)
-     RETURNING id, tag, operator, threshold, severity, message, for_ms, hysteresis, enabled, ref_tag, tolerance`,
-    [id, b.tag, b.operator, b.threshold, b.severity, b.message ?? null, b.for_ms, b.hysteresis, b.enabled, b.ref_tag ?? null, b.tolerance ?? null],
+    `INSERT INTO alarm_rules (id, tag, operator, threshold, severity, message, for_ms, hysteresis, enabled, ref_tag, tolerance, baseline_sigma)
+     VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,0),COALESCE($8,0::double precision),COALESCE($9,true),$10,$11,$12)
+     RETURNING id, tag, operator, threshold, severity, message, for_ms, hysteresis, enabled, ref_tag, tolerance, baseline_sigma`,
+    [id, b.tag, b.operator, b.threshold, b.severity, b.message ?? null, b.for_ms, b.hysteresis, b.enabled, b.ref_tag ?? null, b.tolerance ?? null, b.baseline_sigma ?? null],
   );
   await alarmEngine.refresh();
   await audit(req.user!.username, "alarm-rule.create", b.tag as string);
@@ -473,10 +481,10 @@ app.put("/api/alarm-rules/:id", { preHandler: requireAdmin }, async (req, reply)
   const { rows } = await pool.query(
     `UPDATE alarm_rules SET tag=$2, operator=$3, threshold=$4, severity=$5,
        message=$6, for_ms=COALESCE($7,0), hysteresis=COALESCE($8,0::double precision), enabled=COALESCE($9,true),
-       ref_tag=$10, tolerance=$11
+       ref_tag=$10, tolerance=$11, baseline_sigma=$12
      WHERE id=$1
-     RETURNING id, tag, operator, threshold, severity, message, for_ms, hysteresis, enabled, ref_tag, tolerance`,
-    [id, b.tag, b.operator, b.threshold, b.severity, b.message ?? null, b.for_ms, b.hysteresis, b.enabled, b.ref_tag ?? null, b.tolerance ?? null],
+     RETURNING id, tag, operator, threshold, severity, message, for_ms, hysteresis, enabled, ref_tag, tolerance, baseline_sigma`,
+    [id, b.tag, b.operator, b.threshold, b.severity, b.message ?? null, b.for_ms, b.hysteresis, b.enabled, b.ref_tag ?? null, b.tolerance ?? null, b.baseline_sigma ?? null],
   );
   if (rows.length === 0) return reply.code(404).send({ error: "introuvable" });
   await alarmEngine.refresh();

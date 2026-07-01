@@ -258,6 +258,7 @@ const BLANK = {
   enabled: true,
   ref_tag: "",
   tolerance: 0,
+  baseline_sigma: 0,
 };
 
 function RulesSection() {
@@ -306,6 +307,7 @@ function RulesSection() {
         message: nu.message || null,
         ref_tag: nu.ref_tag.trim() || null,
         tolerance: nu.ref_tag.trim() ? nu.tolerance : null,
+        baseline_sigma: nu.baseline_sigma || null,
       });
       setNu({ ...BLANK });
       load();
@@ -352,7 +354,9 @@ function RulesSection() {
           colonnes : <code>tag, opérateur, seuil, sévérité, message</code> (opérateur/seuil
           vides = alarme booléenne <code>== 1</code>). Mode <b>bande</b> : renseigne un tag de
           référence (ex. une consigne) — la règle compare alors à sa valeur courante ± la
-          tolérance, et ignore opérateur/seuil.
+          tolérance, et ignore opérateur/seuil. Mode <b>self-baseline</b> : renseigne σ — la
+          règle compare à la moyenne/écart-type glissants du tag lui-même (aucune référence
+          externe requise) ; mutuellement exclusif avec le mode bande.
         </>
       }
     >
@@ -364,6 +368,7 @@ function RulesSection() {
             <TableHead>Seuil</TableHead>
             <TableHead>Réf. (bande)</TableHead>
             <TableHead>Tolérance</TableHead>
+            <TableHead>σ (self-baseline)</TableHead>
             <TableHead>Sévérité</TableHead>
             <TableHead>Message</TableHead>
             <TableHead>Actif</TableHead>
@@ -419,6 +424,15 @@ function RulesSection() {
                 />
               </TableCell>
               <TableCell>
+                <Input
+                  type="number"
+                  step="any"
+                  className="w-20"
+                  value={r.baseline_sigma ?? ""}
+                  onChange={(e) => patch(r.id, { baseline_sigma: e.target.value === "" ? null : Number(e.target.value) })}
+                />
+              </TableCell>
+              <TableCell>
                 <select
                   value={r.severity}
                   onChange={(e) => patch(r.id, { severity: e.target.value as Severity })}
@@ -462,7 +476,7 @@ function RulesSection() {
           ))}
           {rules.length === 0 && (
             <TableRow>
-              <TableCell colSpan={9} className="text-muted-foreground">
+              <TableCell colSpan={10} className="text-muted-foreground">
                 Aucune règle. Ajoute-en une ci-dessous ou importe un fichier.
               </TableCell>
             </TableRow>
@@ -508,6 +522,14 @@ function RulesSection() {
           placeholder="tolérance"
           value={nu.tolerance}
           onChange={(e) => setNu({ ...nu, tolerance: Number(e.target.value) })}
+        />
+        <Input
+          type="number"
+          step="any"
+          className="w-20"
+          placeholder="σ (self-baseline)"
+          value={nu.baseline_sigma}
+          onChange={(e) => setNu({ ...nu, baseline_sigma: Number(e.target.value) })}
         />
         <select
           value={nu.severity}

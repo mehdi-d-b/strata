@@ -30,6 +30,9 @@ export type AlarmRule = {
   // ± tolerance, au lieu du seuil fixe operator/threshold (ignorés dans ce cas).
   ref_tag: string | null;
   tolerance: number | null;
+  // Mode self-baseline (si renseigné, et ref_tag NULL) : compare `tag` à sa propre
+  // moyenne/écart-type glissants (tag_stats_1m) ± baseline_sigma écarts-types.
+  baseline_sigma: number | null;
 };
 
 /** État d'évaluation en mémoire d'une règle. */
@@ -45,6 +48,9 @@ export class AlarmEngine {
   // Dernière valeur connue par tag, TOUS tags confondus (pas que ceux avec règle) :
   // sert de référence live pour les règles en mode bande (ref_tag).
   private lastValue = new Map<string, number>();
+  // Moyenne/écart-type glissants (tag_stats_1m), uniquement pour les tags ayant une
+  // règle en mode self-baseline — rafraîchi à la même cadence que refresh().
+  private baselineStats = new Map<string, { mean: number; sd: number }>();
 
   constructor(
     private pool: pg.Pool,
@@ -55,7 +61,7 @@ export class AlarmEngine {
   async refresh(): Promise<void> {
     const { rows } = await this.pool.query(
       `SELECT id, tag, operator, threshold, severity, message, for_ms, hysteresis, enabled,
-              ref_tag, tolerance
+              ref_tag, tolerance, baseline_sigma
        FROM alarm_rules WHERE enabled`,
     );
     this.rules = rows as AlarmRule[];
@@ -68,6 +74,22 @@ export class AlarmEngine {
     // Nettoie l'état des règles disparues.
     const ids = new Set(this.rules.map((r) => r.id));
     for (const id of [...this.state.keys()]) if (!ids.has(id)) this.state.delete(id);
+    await this.refreshBaselines();
+  }
+
+  /** Rafraîchit la moyenne/écart-type glissants pour les tags en mode self-baseline. */
+  private async refreshBaselines(): Promise<void> {
+    const tags = [...new Set(this.rules.filter((r) => r.baseline_sigma != null).map((r) => r.tag))];
+    if (!tags.length) return;
+    const { rows } = await this.pool.query(
+      `SELECT DISTINCT ON (tag) tag, mean, sd FROM tag_stats_1m
+       WHERE tag = ANY($1) ORDER BY tag, bucket DESC`,
+      [tags],
+    );
+    for (const r of rows) {
+      if (r.sd == null) continue;
+      this.baselineStats.set(r.tag, { mean: Number(r.mean), sd: Number(r.sd) });
+    }
   }
 
   /** Au démarrage : resynchronise l'état "active" depuis la table alarms. */
@@ -86,6 +108,11 @@ export class AlarmEngine {
       const refVal = this.lastValue.get(rule.ref_tag);
       if (refVal == null) return false; // référence pas encore connue -> pas de faux positif
       return Math.abs(value - refVal) > (rule.tolerance ?? 0);
+    }
+    if (rule.baseline_sigma != null) {
+      const stats = this.baselineStats.get(rule.tag);
+      if (!stats) return false; // pas encore de baseline -> pas de faux positif
+      return Math.abs(value - stats.mean) > rule.baseline_sigma * stats.sd;
     }
     switch (rule.operator) {
       case ">": return value > rule.threshold;
@@ -109,6 +136,11 @@ export class AlarmEngine {
       if (refVal == null) return false; // référence perdue -> on ne clôt pas sur une supposition
       return Math.abs(value - refVal) < Math.max(0, (rule.tolerance ?? 0) - h);
     }
+    if (rule.baseline_sigma != null) {
+      const stats = this.baselineStats.get(rule.tag);
+      if (!stats) return false; // baseline perdue -> on ne clôt pas sur une supposition
+      return Math.abs(value - stats.mean) < Math.max(0, rule.baseline_sigma * stats.sd - h);
+    }
     switch (rule.operator) {
       case ">":
       case ">=":
@@ -123,9 +155,9 @@ export class AlarmEngine {
 
   private defaultMessage(rule: AlarmRule): string {
     if (rule.message?.trim()) return rule.message;
-    return rule.ref_tag
-      ? `${rule.tag} écart > ${rule.tolerance} vs ${rule.ref_tag}`
-      : `${rule.tag} ${rule.operator} ${rule.threshold}`;
+    if (rule.ref_tag) return `${rule.tag} écart > ${rule.tolerance} vs ${rule.ref_tag}`;
+    if (rule.baseline_sigma != null) return `${rule.tag} écart > ${rule.baseline_sigma}σ (baseline)`;
+    return `${rule.tag} ${rule.operator} ${rule.threshold}`;
   }
 
   /** Traite une mesure (valeur déjà scalée) : lève/clôt les alarmes concernées. */
