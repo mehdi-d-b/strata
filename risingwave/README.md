@@ -1,9 +1,12 @@
-# risingwave/ — moteur de calcul temps réel (profil optionnel)
+# risingwave/ — moteur de calcul temps réel (profil optionnel, dernier recours)
 
-> ✅ **État : chaîne validée de bout en bout** (branche `feat/risingwave`).
-> RisingWave lit `tags.raw`, calcule des stats glissantes par tag, détecte des
-> anomalies et les réémet dans le topic `tags.derived`. Reste à brancher le
-> consumer côté gateway (`tags.derived` → table `alarms` source='derived').
+> ✅ **État : chaîne validée de bout en bout, déjà dans `main`** (consumer gateway
+> `tags.derived` → `alarms` source='derived' inclus — cf. §« chaîne complète FAITE » plus bas).
+>
+> ⚠️ **Dernier recours, non construit par défaut.** Pour la dérive/self-baseline (le cas d'usage
+> qui a motivé ce chantier), un continuous aggregate TimescaleDB + le mode bande de `alarm_rules`
+> suffit (cf. `docs/infra-architecture.md` §3) — sans faire tourner ce service. Ne réactiver ce
+> profil que pour un vrai besoin sub-seconde ou de forte cardinalité de tags.
 >
 > Note env : l'image n'embarque pas `psql` ; on utilise le `psql` du container
 > `timescaledb` pointé sur `risingwave:4566` (voir commandes ci-dessous). Le pull

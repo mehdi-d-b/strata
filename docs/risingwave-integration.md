@@ -1,5 +1,14 @@
 # RisingWave dans Strata — ce que c'est, ce que ça remplace, ce que ça débloque
 
+> ⚠️ **Statut (2026-07) : dernier recours, non construit par défaut.** La chaîne est câblée et
+> validée (profil Docker optionnel `risingwave`), mais pour le cas d'usage qui l'avait motivé
+> (dérive/self-baseline sur un tag) un continuous aggregate TimescaleDB + le mode bande de
+> `alarm_rules` (cf. `docs/infra-architecture.md` §3) suffit, sans le coût d'un service streaming
+> de plus. Ne réactiver ce profil que si un vrai besoin **sub-seconde** ou de très forte
+> cardinalité de tags apparaît (cf. ADR 0001 : « stream processing stateful avancé, différé »).
+> Le reste de ce document explique le raisonnement d'origine — il reste valable pour évaluer
+> *quand* franchir ce seuil, pas comme guide d'activation par défaut.
+
 > Document d'aide à la décision. Objectif : comprendre **précisément** ce que
 > RisingWave apporterait à Strata, ce qu'il remplace (peu de choses), ce qu'il
 > améliore, ce qu'il débloque (beaucoup), et où sont les pièges. Écrit pour

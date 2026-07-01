@@ -107,10 +107,14 @@ Architecture **cerveau / faces** conçue pour accueillir les vraies faces en P6 
 - [x] Persistance : relancer Strata recharge tout depuis la base
 
 ## Phase 9 — Plus si affinité
-- [ ] RisingWave : streams dérivés temps réel — **évolution de la détection d'alarmes à
-      l'échelle** (aujourd'hui les seuils sont évalués dans la gateway ; le modèle `alarms` est
-      déjà conçu indépendant du détecteur, `source: rule|tag`, pour basculer vers RisingWave
-      **sans toucher l'UI**). Aussi : alarmes dérivées multi-tags, fenêtres glissantes.
+- [x] RisingWave : profil Docker optionnel déjà dans `main` (chaîne validée
+      `tags.raw→MV→tags.derived→alarms source=derived`, cf. `risingwave/README.md`). Le modèle
+      `alarms` est bien indépendant du détecteur (`source: rule|tag|derived`), comme prévu.
+      ⚠️ **Dernier recours, non construit par défaut** : pour la dérive/self-baseline (le cas
+      d'usage visé ici), un continuous aggregate TimescaleDB + le mode bande de `alarm_rules`
+      (cf. `docs/infra-architecture.md` §3) suffit largement, sans le coût d'un service
+      streaming de plus. Ne réactiver RisingWave que si un vrai besoin **sub-seconde** apparaît
+      (cf. ADR 0001).
 - [ ] SCADA / synoptiques (vues schématiques animées par les tags)
 - [x] **OEE complet** (Disponibilité × Performance × Qualité) — backend (vues Timescale
       `oee_by_shift` + `/api/oee`), config par ligne (`oee_line`), **objectifs + projection
