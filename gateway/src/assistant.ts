@@ -706,10 +706,10 @@ const SYSTEM_PROMPT_STATIC =
   "recommandations non demandés. Si on demande une seule chose (la dernière alarme, un chiffre…), " +
   "donne juste ça. Pour toute donnée chiffrée (OEE, production, alarmes, mesures), utilise TOUJOURS les " +
   "tools — n'invente jamais de valeurs. Si une donnée n'est pas disponible via un tool, dis-le. " +
-  "Pour DIAGNOSTIQUER un batch (pourquoi un brassage est raté / hors spec, qu'est-ce qui a dévié), " +
-  "APPELLE TOUJOURS get_batch_context — même si un batch a déjà été analysé dans ce chat. Les données " +
-  "de batch dans l'historique concernent un AUTRE batch : ne les réutilise jamais pour répondre sur un " +
-  "nouveau batch ID. COMMENCE par le champ `conforme` : s'il est vrai (verdict 'ok'), le " +
+  "Pour DIAGNOSTIQUER un batch (pourquoi un brassage est raté / hors spec, qu'est-ce qui a dévié), le " +
+  "dossier vient de get_batch_context (déjà appelé pour toi si la question porte sur ce batch — sinon " +
+  "appelle-le toi-même). Ne réutilise JAMAIS des données de batch mentionnées plus haut dans la " +
+  "conversation : elles concernent un AUTRE batch. COMMENCE par le champ `conforme` : s'il est vrai (verdict 'ok'), le " +
   "batch est CONFORME — dis-le clairement et N'INVENTE PAS de défaut, même si la question suppose un " +
   "problème. Si non conforme, le DÉFAUT est donné par `defaut_type` (c'est LE résultat QC) : énonce-le, " +
   "puis EXPLIQUE-le avec `cip_ok` (faux => contamination/sanitation) et `cuves_hors_bande` (cuves en " +
@@ -727,7 +727,7 @@ const SYSTEM_PROMPT_STATIC =
   "si l'opérateur demande explicitement d'effectuer une action — jamais pour répondre à une question " +
   "sur la procédure à suivre. Ces actions sont des PROPOSITIONS soumises à confirmation humaine.";
 
-async function buildFactoryContext(pool: pg.Pool): Promise<string> {
+async function buildFactoryContext(pool: pg.Pool): Promise<{ text: string; recipes: string[] }> {
   const [lines, machines, recipes] = await Promise.all([
     pool.query("SELECT line, label, ideal_rate FROM oee_line WHERE enabled = true ORDER BY line"),
     pool.query(`
@@ -754,16 +754,57 @@ async function buildFactoryContext(pool: pg.Pool): Promise<string> {
     })
     .join("\n");
 
-  const recipesText = recipes.rows.map((r) => r.recipe).join(", ");
+  const recipeNames = recipes.rows.map((r) => r.recipe as string);
+  const recipesText = recipeNames.join(", ");
 
-  return (
+  const text =
     "CONTEXTE USINE (extrait dynamiquement de la base) :\n" +
     "Lignes actives :\n" + linesText + "\n" +
     "Recettes connues : " + recipesText + "\n" +
     "Convention tags : <site>.<ligne>.<machine>.<mesure>\n" +
     "États machines : <machine>.state → 0=arrêt, 1=marche ; <machine>.en_attente → 1=bloqué amont\n" +
-    "Pour connaître les tags exacts d'une machine, utilise describe_schema ou query_readonly sur la table `tags`."
-  );
+    "Pour connaître les tags exacts d'une machine, utilise describe_schema ou query_readonly sur la table `tags`.";
+
+  return { text, recipes: recipeNames };
+}
+
+const BATCH_DIAG_VERBS = /\b(pourquoi|diagnosti\w*|analyse\w*|explique\w*|cause)\b/i;
+const BATCH_WORDS = /\b(batch|brassage|lot)\b/i;
+const BATCH_ID_RE = /\b[a-z]+-[0-9a-f-]{6,}\b/i;
+// Une recette ("ipa", "blonde"...) est AUSSI un nom de ligne (`brasserie.blonde`) : la
+// mention seule ne suffit pas à distinguer « pourquoi la ligne blonde est arrêtée » (état
+// machine, pas un batch) de « pourquoi le dernier ipa est hors spec » (batch). On exige donc
+// en plus un mot-clé de verdict qualité.
+const QC_WORDS = /\b(hors spec|conforme|contamin\w*|d[ée]faut|rebut|qualit[ée]|rat[ée]\w*|nok)\b/i;
+
+/**
+ * Détecte un diagnostic de batch et renvoie le batch_ref à transmettre à
+ * get_batch_context : l'id extrait s'il y en a un, sinon le message brut (dont la
+ * résolution par sous-chaîne de recette, cf. get_batch_context, s'occupe déjà —
+ * pas besoin d'un extracteur d'entité séparé).
+ */
+function detectBatchDiagnostic(text: string, recipes: string[]): string | null {
+  if (!BATCH_DIAG_VERBS.test(text)) return null;
+  const idMatch = text.match(BATCH_ID_RE);
+  const hasRecipe = recipes.some((r) => text.toLowerCase().includes(r.toLowerCase()));
+  if (!idMatch && !BATCH_WORDS.test(text) && !(hasRecipe && QC_WORDS.test(text))) return null;
+  return idMatch ? idMatch[0] : text;
+}
+
+/**
+ * Construit la requête search_knowledge à partir du défaut RÉEL du dossier batch
+ * (jamais d'une déviation supposée) : null si le batch est conforme ou en erreur.
+ */
+function buildKnowledgeQuery(ctx: Record<string, unknown>): string | null {
+  if (ctx.error || ctx.conforme) return null;
+  const batch = (ctx.batch as Record<string, unknown>) ?? {};
+  const parts: string[] = [];
+  if (batch.defaut_type) parts.push(String(batch.defaut_type));
+  if (ctx.cip_ok === false) parts.push("contamination sanitation CIP");
+  const cuves = (ctx.cuves_hors_bande as string[] | undefined) ?? [];
+  if (cuves.length) parts.push(`déviation thermique ${cuves.join(", ")}`);
+  if (!parts.length) return null;
+  return `${batch.recipe ?? ""} ${parts.join(" ")}`.trim();
 }
 
 /** Boucle d'agent : appelle le LLM, exécute les tools demandés, jusqu'à la réponse. */
@@ -789,7 +830,9 @@ export async function runAssistant(
   const userMsg = history.filter((m) => m.role === "user").at(-1)?.content ?? "";
   agentLog(runId, { event: "start", user: username, history_turns: history.length, question: userMsg.slice(0, 120) });
 
-  const factoryContext = await buildFactoryContext(pool).catch(() => "");
+  const { text: factoryContext, recipes: knownRecipes } = await buildFactoryContext(pool).catch(
+    () => ({ text: "", recipes: [] as string[] }),
+  );
   const systemPrompt = factoryContext
     ? `${SYSTEM_PROMPT_STATIC}\n\n${factoryContext}`
     : SYSTEM_PROMPT_STATIC;
@@ -806,7 +849,38 @@ export async function runAssistant(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const messages: any[] = [{ role: "system", content: systemPrompt }, ...clean];
 
-  for (let step = 0; step < MAX_STEPS; step++) {
+  // Phases forcées (hypothèses → preuves) pour un diagnostic de batch : on ne
+  // laisse pas le modèle décider seul de récupérer le dossier ni les preuves
+  // corrélées — c'est le harness qui garantit la séquence, pas le prompt.
+  // cf. docs/assistant-roadmap.md §2 (routing + boucle RCA orchestrée).
+  let preSteps = 0;
+  const batchRef = detectBatchDiagnostic(userMsg, knownRecipes);
+  if (batchRef) {
+    const forced = async (name: string, args: Args): Promise<string> => {
+      onEvent?.({ type: "tool_call", step: preSteps, name });
+      const t = Date.now();
+      const result = await execTool(pool, user, name, args);
+      const ms = Date.now() - t;
+      agentLog(runId, { event: "tool", step: preSteps, name, args, result_bytes: result.length, ms, forced: true });
+      onEvent?.({ type: "tool_result", step: preSteps, name, ms, result_bytes: result.length });
+      messages.push({
+        role: "assistant",
+        content: "",
+        // Ollama /api/chat attend `arguments` comme un OBJET (pas une string JSON) —
+        // c'est le format qu'il renvoie lui-même pour les tool_calls du modèle.
+        tool_calls: [{ function: { name, arguments: args } }],
+      });
+      messages.push({ role: "tool", content: result });
+      preSteps++;
+      return result;
+    };
+    const ctxRaw = await forced("get_batch_context", { batch_ref: batchRef });
+    const ctx = JSON.parse(ctxRaw) as Record<string, unknown>;
+    const query = buildKnowledgeQuery(ctx);
+    if (query) await forced("search_knowledge", { query });
+  }
+
+  for (let step = preSteps; step < MAX_STEPS; step++) {
     // API NATIVE Ollama (/api/chat) : elle honore `num_ctx` (l'endpoint /v1 compatible
     // OpenAI l'ignore → contexte resté à ~2048, d'où les troncatures). qwen2.5 va
     // jusqu'à 32k ; 8192 suffit largement pour prompt + tools + résultats.
