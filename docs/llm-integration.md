@@ -14,9 +14,10 @@ Tranché : **assistant 100 % local / open-source, aucun cloud, aucun service pay
   requête standard de fait**, **pas** une connexion à OpenAI : tout tourne en local, aucune
   donnée ne sort. Avantage : pas de lock-in (swap de runtime sans changer le code).
 - **Modèle** : open-weights avec **tool-calling** natif (**Qwen2.5**, Llama 3.1/3.3). Taille
-  selon le matériel (7-8B sur CPU/GPU grand public = Q&A simple ; 70B sur vrai GPU = raisonnement
-  multi-étapes fiable). ⚠️ Un petit modèle local est plus faible qu'un frontier sur les
-  enchaînements de tools → commencer par du **Q&A en lecture**.
+  selon le matériel — **MacBook Air M4, 16 Go de RAM unifiée, GPU Metal via Ollama** : 7-8B
+  confortable, 14B q4 le plafond réaliste (70B+ hors de portée sur cette machine). ⚠️ Un petit
+  modèle local est plus faible qu'un frontier sur les enchaînements de tools → commencer par du
+  **Q&A en lecture**.
 - **Architecture choisie = « Chemin B » (agent in-app)** : un **backend agent dans la gateway**
   (`POST /api/assistant/chat`) qui appelle Ollama avec les tools et **exécute les tools avec la
   session de l'utilisateur connecté** → le LLM hérite **automatiquement de son RBAC + audit**.
@@ -53,9 +54,10 @@ RisingWave/Timescale), on ajoute deux tools — et **le LLM découvre le schéma
 - `query_readonly(sql)` : exécuté via **rôle Postgres `strata_ro`** (SELECT seulement, jamais
   l'auth) + **transaction READ ONLY** + `statement_timeout` + wrap `LIMIT 500`. Défense en
   profondeur, testée : lecture données OK / table `users` refusée / `INSERT` refusé.
-- ⚠️ **qwen2.5:3b sur CPU n'y arrive pas** (il thrashe sur le flux describe→query, contexte
-  trop court même avec `num_ctx` relevé). **Part A n'est exploitable qu'avec un vrai modèle/GPU**
-  (14B+). L'infra, elle, est prête et sûre.
+- ⚠️ **qwen2.5:3b n'y arrivait pas** (il thrashait sur le flux describe→query, contexte trop
+  court même avec `num_ctx` relevé) — testé sur l'ancienne machine, CPU seul. **Depuis le passage
+  sur MacBook Air M4** (GPU Metal, 16 Go), à réévaluer avec un modèle 14B. L'infra, elle, est
+  prête et sûre.
 
 ### Dosage v1 / v2 (et matériel)
 
@@ -63,7 +65,7 @@ RisingWave/Timescale), on ajoute deux tools — et **le LLM découvre le schéma
   dans la gateway (`POST /api/assistant/chat`, `gateway/src/assistant.ts`) + tools de **lecture
   figés** (`get_oee`, `get_production`, `list_alarms`, `get_history`). Test : le modèle a appelé
   `get_oee` et répondu le bon OEE (sans halluciner), ~49 s sur CPU. UI chat = côté front.
-- **v2 (quand modèle capable + vrai GPU)** : `describe_schema` + `query_readonly` (bac à sable
+- **v2 (avec un modèle 14B sur le Mac M4)** : `describe_schema` + `query_readonly` (bac à sable
   read-only), puis tools d'**action encadrée** (write via gateway + confirmation humaine).
 
 **État Part B — FAIT & validé (sûr même sur petit modèle)** : motif **propose → confirme →
@@ -77,9 +79,9 @@ exécutés par le modèle) → l'API renvoie une `pending_action`. Contrat front
 
 Sécurité : zéro écriture autonome, RBAC re-vérifié à l'exécution, audit, action à usage unique
 (TTL 10 min). Un mauvais choix du modèle = une proposition que l'humain rejette → inoffensif.
-- **Matériel** : accélération GPU **AMD/ROCm peu fiable** hors cartes récentes (et nulle en WSL2)
-  → souvent **CPU**. OK pour valider l'archi + Q&A simple (modèle 3B), pas pour la vitesse ni le
-  text-to-SQL. Le vrai assistant = vraie machine/GPU + modèle plus gros.
+- **Matériel** : passage sur **MacBook Air M4** (GPU Metal via Ollama, **16 Go de RAM unifiée**)
+  — fini le plafond CPU. Budget mémoire : 7-8B confortable, **14B q4 le plafond réaliste** sur
+  cette machine ; au-delà (32B+), il faudrait plus de RAM unifiée ou un GPU dédié.
 
 ## 0. La règle d'or (non négociable)
 

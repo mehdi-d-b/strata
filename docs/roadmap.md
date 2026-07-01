@@ -249,15 +249,31 @@ rétention sans toucher au SQL »).
       `describe_schema` (catalogue des tables de données via les grants) + `query_readonly`
       (SELECT exécuté via rôle Postgres **read-only** `strata_ro` + transaction READ ONLY +
       timeout + LIMIT). **Sandbox validé** (lecture données OK, auth refusée, écriture refusée).
-      ⚠️ **Bridé par le modèle local** : qwen2.5:3b sur CPU n'arrive pas à piloter le flux
-      describe→query (thrash). **Utilisable seulement avec un vrai modèle/GPU.**
+      ⚠️ **Bridé par le modèle local** : qwen2.5:3b n'arrivait pas à piloter le flux
+      describe→query (thrash) — testé sur l'ancienne machine, CPU seul. **À réévaluer sur le
+      Mac M4 (GPU Metal, 16 Go) avec un modèle 14B.**
 - [x] **v2 — Part B : action encadrée** (propose → confirme → exécute) : write tools
       (`set_command`, `ack_alarm`) **interceptés** par la boucle → proposition à **confirmation
       humaine** (`pending_action`) ; `POST /api/assistant/confirm` re-vérifie `can(write)`, exécute,
       audite, **consomme** (one-shot). **Validé en live** (le 3B propose, l'humain confirme, l'ack
       s'exécute). Sûr même avec un petit modèle (l'humain est le garde-fou).
-- [ ] **v2 — suite** : **streaming** (UX), **vrai modèle/GPU** (prérequis de Part A / diagnostic
-      multi-étapes), **RAG** local (pgvector + embeddings) si besoin doc métier.
+- [x] **v3 — tools d'investigation enrichis** : `get_batch_context` (dossier batch complet :
+      déviations par cuve vs bande nominale `[temp_cible ± temp_tol]`, exclusion du transitoire
+      de chauffe, alarmes pendant le batch, changements de consigne, CIP — réf = id ou recette
+      `"dernier ipa"`), `get_line_status` (état temps réel machine par machine), `get_shift_summary`
+      (OEE + batches + alarmes du shift courant), `get_oee_breakdown` (cascade des pertes),
+      `get_active_batches`, `search_knowledge` (RAG pgvector sur SOPs/incidents).
+      Système prompt enrichi : guide le LLM pour ne jamais inventer de déviation, lire `conforme`
+      en premier, appeler `search_knowledge` avant d'investiguer les tags sur une question procédurale.
+      SSE live trace : le front voit les tools s'enchaîner en temps réel.
+- [x] **v4 — routing + hypothèses/preuves forcées** : `detectBatchDiagnostic` (heuristique légère :
+      verbe diagnostic + mot batch/recette connue/id) route les questions de diagnostic batch ;
+      `get_batch_context` puis (si non conforme) `search_knowledge` ciblé sur le défaut réel
+      (`defaut_type`/`cip_ok`/`cuves_hors_bande`) sont **appelés en code, jamais laissés au choix
+      du modèle**, et injectés dans l'historique avant la boucle ReAct existante (même mécanique
+      de tool-call, zéro changement front). Le modèle n'a plus qu'à corréler/conclure sur un
+      dossier déjà complet ; il garde la liberté d'appeler un tool de plus en filet de sécurité.
+- [ ] **v4 — streaming token** (UX) + valider en live avec `qwen2.5:14b` sur le Mac M4.
 
 ### Documentation utilisateur / aide en ligne (in-app)
 But : qu'un **utilisateur non-tech** découvre **toutes** les features et **comment les utiliser**.

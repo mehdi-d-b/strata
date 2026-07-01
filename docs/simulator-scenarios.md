@@ -228,5 +228,6 @@ Tous les scénarios tournent en **rotation** (`CYCLE_PLANS`) — un défaut net 
 > [assistant-roadmap.md](assistant-roadmap.md)).
 
 > Suite logique côté assistant (hors de ce doc) : `get_batch_context` → puis le workflow RCA
-> routé. Le réglage fin du raisonnement attendra un GPU + un modèle plus gros ; toute la
-> plomberie (et la vérité terrain ci-dessus) se construit et se teste dès maintenant.
+> routé. Le réglage fin du raisonnement se fait avec le meilleur modèle tenant dans les 16 Go du
+> Mac M4 (14B) ; toute la plomberie (et la vérité terrain ci-dessus) se construit et se teste dès
+> maintenant.
