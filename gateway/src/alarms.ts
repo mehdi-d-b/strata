@@ -30,8 +30,11 @@ export type AlarmRule = {
   // ± tolerance, au lieu du seuil fixe operator/threshold (ignorés dans ce cas).
   ref_tag: string | null;
   tolerance: number | null;
-  // Mode self-baseline (si renseigné, et ref_tag NULL) : compare `tag` à sa propre
-  // moyenne/écart-type glissants (tag_stats_1m) ± baseline_sigma écarts-types.
+  // Mode self-baseline (si renseigné, et ref_tag NULL) : compare la tendance COURT terme
+  // de `tag` (tag_stats_1m) à sa tendance LONG terme (tag_stats_5m) ± baseline_sigma
+  // écarts-types du long terme. Comparer deux moyennes lissées plutôt qu'une valeur
+  // instantanée à une moyenne évite le clignotement sur une vraie dérive lente (le
+  // long terme ne "rattrape" pas l'anomalie, contrairement à une fenêtre courte seule).
   baseline_sigma: number | null;
 };
 
@@ -48,9 +51,11 @@ export class AlarmEngine {
   // Dernière valeur connue par tag, TOUS tags confondus (pas que ceux avec règle) :
   // sert de référence live pour les règles en mode bande (ref_tag).
   private lastValue = new Map<string, number>();
-  // Moyenne/écart-type glissants (tag_stats_1m), uniquement pour les tags ayant une
-  // règle en mode self-baseline — rafraîchi à la même cadence que refresh().
+  // Moyenne/écart-type glissants COURT terme (tag_stats_1m) et LONG terme (tag_stats_5m),
+  // uniquement pour les tags ayant une règle en mode self-baseline — rafraîchis à la même
+  // cadence que refresh(). Le mode self-baseline compare les deux (cf. AlarmRule.baseline_sigma).
   private baselineStats = new Map<string, { mean: number; sd: number }>();
+  private longStats = new Map<string, { mean: number; sd: number }>();
 
   constructor(
     private pool: pg.Pool,
@@ -77,18 +82,29 @@ export class AlarmEngine {
     await this.refreshBaselines();
   }
 
-  /** Rafraîchit la moyenne/écart-type glissants pour les tags en mode self-baseline. */
+  /** Rafraîchit les tendances court/long terme pour les tags en mode self-baseline. */
   private async refreshBaselines(): Promise<void> {
     const tags = [...new Set(this.rules.filter((r) => r.baseline_sigma != null).map((r) => r.tag))];
     if (!tags.length) return;
-    const { rows } = await this.pool.query(
-      `SELECT DISTINCT ON (tag) tag, mean, sd FROM tag_stats_1m
-       WHERE tag = ANY($1) ORDER BY tag, bucket DESC`,
-      [tags],
-    );
-    for (const r of rows) {
+    const [short, long] = await Promise.all([
+      this.pool.query(
+        `SELECT DISTINCT ON (tag) tag, mean, sd FROM tag_stats_1m
+         WHERE tag = ANY($1) ORDER BY tag, bucket DESC`,
+        [tags],
+      ),
+      this.pool.query(
+        `SELECT DISTINCT ON (tag) tag, mean, sd FROM tag_stats_5m
+         WHERE tag = ANY($1) ORDER BY tag, bucket DESC`,
+        [tags],
+      ),
+    ]);
+    for (const r of short.rows) {
       if (r.sd == null) continue;
       this.baselineStats.set(r.tag, { mean: Number(r.mean), sd: Number(r.sd) });
+    }
+    for (const r of long.rows) {
+      if (r.sd == null) continue;
+      this.longStats.set(r.tag, { mean: Number(r.mean), sd: Number(r.sd) });
     }
   }
 
@@ -110,9 +126,12 @@ export class AlarmEngine {
       return Math.abs(value - refVal) > (rule.tolerance ?? 0);
     }
     if (rule.baseline_sigma != null) {
-      const stats = this.baselineStats.get(rule.tag);
-      if (!stats) return false; // pas encore de baseline -> pas de faux positif
-      return Math.abs(value - stats.mean) > rule.baseline_sigma * stats.sd;
+      // Court terme vs long terme (pas la valeur instantanée) : évite le clignotement
+      // sur une dérive lente (cf. infra/timescale/init/17-tag-stats-long.sql).
+      const short = this.baselineStats.get(rule.tag);
+      const long = this.longStats.get(rule.tag);
+      if (!short || !long) return false; // pas encore de tendance -> pas de faux positif
+      return Math.abs(short.mean - long.mean) > rule.baseline_sigma * long.sd;
     }
     switch (rule.operator) {
       case ">": return value > rule.threshold;
@@ -137,9 +156,10 @@ export class AlarmEngine {
       return Math.abs(value - refVal) < Math.max(0, (rule.tolerance ?? 0) - h);
     }
     if (rule.baseline_sigma != null) {
-      const stats = this.baselineStats.get(rule.tag);
-      if (!stats) return false; // baseline perdue -> on ne clôt pas sur une supposition
-      return Math.abs(value - stats.mean) < Math.max(0, rule.baseline_sigma * stats.sd - h);
+      const short = this.baselineStats.get(rule.tag);
+      const long = this.longStats.get(rule.tag);
+      if (!short || !long) return false; // tendance perdue -> on ne clôt pas sur une supposition
+      return Math.abs(short.mean - long.mean) < Math.max(0, rule.baseline_sigma * long.sd - h);
     }
     switch (rule.operator) {
       case ">":
@@ -156,7 +176,7 @@ export class AlarmEngine {
   private defaultMessage(rule: AlarmRule): string {
     if (rule.message?.trim()) return rule.message;
     if (rule.ref_tag) return `${rule.tag} écart > ${rule.tolerance} vs ${rule.ref_tag}`;
-    if (rule.baseline_sigma != null) return `${rule.tag} écart > ${rule.baseline_sigma}σ (baseline)`;
+    if (rule.baseline_sigma != null) return `${rule.tag} tendance 1 min écart > ${rule.baseline_sigma}σ vs tendance 5 min`;
     return `${rule.tag} ${rule.operator} ${rule.threshold}`;
   }
 
