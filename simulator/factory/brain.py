@@ -47,6 +47,16 @@ _VIBRATION_NOISE = 0.05  # mm/s
 # CUMULÉ pour atteindre l'usure complète, avant auto-réparation (maintenance).
 _WEAR_DURATION_S = 1500.0  # 25 min de fonctionnement cumulé
 
+# Groupe froid (boucle glycol) — même logique que l'usure ci-dessus : dérive TOUJOURS
+# ACTIVE, hors cycle de batch, mais ici un cycle de DÉGIVRAGE périodique (l'évaporateur
+# givre, doit dégivrer) plutôt qu'une usure monotone. Donne au mode BANDE (consigne
+# fixe) un cas de démonstration représentatif d'un vrai déploiement (batch de plusieurs
+# heures), contrairement à une cuve qui redémarre à chaque cycle de 6 min en démo.
+_CHILLER_NOISE = 0.15         # °C, bruit de mesure (même idiome que _MEAS_NOISE)
+_DEFROST_INTERVAL_S = 900.0   # 15 min de fonctionnement entre deux dégivrages
+_DEFROST_DURATION_S = 90.0    # durée d'un dégivrage
+_DEFROST_RISE = 5.0           # °C au-dessus de la consigne pendant le dégivrage
+
 # Codes de verdict QC d'un batch (NUMÉRIQUES car tags.raw ne transporte que des
 # nombres). La gateway mappe ces codes vers un defaut_type texte pour la table
 # `batches`. Un verdict = RÉSULTAT QC (le batch est-il conforme, quel défaut), pas la
@@ -389,6 +399,48 @@ class Recipe:
 
 
 @dataclass
+class Chiller:
+    """Groupe froid (boucle glycol) : UNIQUE pour toute la brasserie (site), pas par
+    recette/ligne — tourne en continu, indépendamment des cycles de brassage.
+    Contrairement aux cuves (redémarrées à chaque batch), donne un cas de
+    démonstration "bande vs consigne" représentatif d'un vrai déploiement, où le
+    batch dure des heures et non 6 minutes.
+
+    Dérive réaliste, pas juste du bruit : un vrai groupe froid givre son évaporateur
+    et nécessite un dégivrage périodique, pendant lequel la température dépasse
+    temporairement la consigne — un écart RÉEL et récurrent, sur une échelle de temps
+    clairement différente du cycle de batch, pas un artefact de démarrage.
+
+    Tag à 3 segments (site.machine.mesure, pas site.ligne.machine.mesure) : c'est un
+    équipement de SITE, sans "ligne" — écart de convention assumé, premier cas de ce
+    type dans le projet (cf. docs/simulator-scenarios.md).
+    """
+    setpoint: float = 2.0
+    temperature: float = 2.0
+    # Amorcé pour un premier dégivrage rapide en démo (~2 min), pas 15 min d'attente.
+    _defrost_elapsed: float = _DEFROST_INTERVAL_S - 120.0
+    _defrost_remaining: float = 0.0
+
+    def tick(self, dt: float) -> None:
+        self._defrost_elapsed += dt
+        if self._defrost_remaining <= 0 and self._defrost_elapsed >= _DEFROST_INTERVAL_S:
+            self._defrost_remaining = _DEFROST_DURATION_S
+            self._defrost_elapsed = 0.0
+        active = self._defrost_remaining > 0
+        if active:
+            self._defrost_remaining -= dt
+        target = self.setpoint + (_DEFROST_RISE if active else 0.0)
+        self.temperature += (target - self.temperature) * min(1.0, dt / 20.0)
+
+    def tags(self, site: str) -> dict[str, float]:
+        p = f"{site}.groupe_froid"
+        return {
+            f"{p}.consigne": self.setpoint,
+            f"{p}.temperature": round(self.temperature + random.gauss(0, _CHILLER_NOISE), 2),
+        }
+
+
+@dataclass
 class Brewery:
     """La brasserie complète : le cerveau. Protocol-agnostique.
 
@@ -396,6 +448,7 @@ class Brewery:
     """
     site: str = "brasserie"
     recipes: list[Recipe] = field(default_factory=list)
+    chiller: Chiller = field(default_factory=Chiller)
     _t: float = 0.0
 
     @classmethod
@@ -469,6 +522,9 @@ class Brewery:
 
     def tick(self, dt: float) -> None:
         self._t += dt
+        # Toujours actif, indépendamment des recettes/batches (un vrai groupe froid
+        # tourne 24/7) — cf. Chiller.
+        self.chiller.tick(dt)
         for r in self.recipes:
             for v in r.vessels:
                 v.tick(dt)
@@ -504,4 +560,5 @@ class Brewery:
             s[f"{prefix}.cip_ok"] = 1.0 if r._batch_cip_ok else 0.0
             # Tags du batch (en cours ou dernier clôturé) : id, phase, verdict, rebut.
             s.update(r.batch_tags(prefix))
+        s.update(self.chiller.tags(self.site))
         return s

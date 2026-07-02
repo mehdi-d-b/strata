@@ -242,3 +242,14 @@ active**, indépendante de la rotation des scénarios et persistante entre batch
 tourne, sur plusieurs cycles, avant une auto-réparation (retour à zéro). Aucune consigne n'est
 associée à ce tag — c'est le cas de test du mode **self-baseline** de `alarm_rules`
 (`gateway/src/alarms.ts`), pas un 6ᵉ scénario avec verdict QC.
+
+**2ᵉ exemple, mode bande cette fois** : `brasserie.groupe_froid.temperature` / `.consigne`
+(`simulator/factory/brain.py`, classe `Chiller`) — un groupe froid **unique pour toute la
+brasserie** (pas par ligne/recette), qui tourne en continu, indépendamment des cycles de brassage.
+Contrairement à une cuve de procédé (qui redémarre à chaque batch — 6 min en démo, contre plusieurs
+heures en vrai déploiement — et dont le régime transitoire de démarrage dominerait une règle de
+seuil bande continue), le groupe froid donne un cas représentatif : une consigne fixe, une mesure
+qui la suit de près la plupart du temps, et un écart RÉEL et récurrent (cycle de dégivrage
+périodique de l'évaporateur, ~15 min) sur une échelle de temps clairement découplée du cycle de
+batch. **Écart de convention assumé** : tag à 3 segments (`site.machine.mesure`), pas 4
+(`site.ligne.machine.mesure`) — c'est un équipement de site, sans "ligne".

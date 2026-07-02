@@ -702,6 +702,34 @@ app.get("/api/history", async (req, reply) => {
   return rows;
 });
 
+// Tendance lissée d'un tag (moyenne par bucket), pour visualiser ce que le mode
+// self-baseline de alarm_rules compare (court terme tag_stats_1m vs long terme
+// tag_stats_5m — cf. gateway/src/alarms.ts). Même contrat que /api/history
+// ({ts,value}[]) pour être branchable directement dans MultiChart côté front.
+const TAG_STATS_TABLE: Record<string, string> = { "1m": "tag_stats_1m", "5m": "tag_stats_5m" };
+app.get("/api/tag-stats", async (req, reply) => {
+  const q = req.query as { tag?: string; window?: string; from?: string; to?: string };
+  const tag = q.tag;
+  if (!tag) return reply.code(400).send({ error: "param 'tag' requis" });
+  const table = TAG_STATS_TABLE[q.window ?? ""];
+  if (!table) return reply.code(400).send({ error: "param 'window' doit être '1m' ou '5m'" });
+
+  const fromTs = new Date(q.from ?? "");
+  const toTs = new Date(q.to ?? "");
+  if (isNaN(fromTs.getTime()) || isNaN(toTs.getTime()))
+    return reply.code(400).send({ error: "from/to doivent être des dates ISO 8601 valides" });
+  if (fromTs >= toTs) return reply.code(400).send({ error: "from doit être strictement avant to" });
+
+  // `table` vient d'une allowlist fixe ci-dessus, jamais de l'input brut -> pas d'injection.
+  const { rows } = await pool.query(
+    `SELECT bucket AS ts, mean AS value FROM ${table}
+     WHERE tag = $1 AND bucket >= $2 AND bucket <= $3
+     ORDER BY bucket ASC`,
+    [tag, fromTs.toISOString(), toTs.toISOString()],
+  );
+  return rows;
+});
+
 // ─── Production / shifts / rôles (Phase 3) ────────────────────────────────
 
 // Production par shift et par rôle. Optionnel ?days=N pour limiter l'historique.

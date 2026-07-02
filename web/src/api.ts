@@ -73,6 +73,17 @@ export const fetchHistoryRange = (tag: string, fromIso: string, toIso: string) =
     )}&to=${encodeURIComponent(toIso)}`,
   );
 
+/**
+ * Tendance lissée d'un tag (moyenne par bucket court "1m" ou long "5m") — ce que le
+ * mode self-baseline de alarm_rules compare. Même forme que fetchHistoryRange.
+ */
+export const fetchTagStats = (tag: string, window: "1m" | "5m", fromIso: string, toIso: string) =>
+  api<{ ts: string; value: number }[]>(
+    `/api/tag-stats?tag=${encodeURIComponent(tag)}&window=${window}&from=${encodeURIComponent(
+      fromIso,
+    )}&to=${encodeURIComponent(toIso)}`,
+  );
+
 /** Libellé d'affichage d'un tag : label si présent, sinon son nom. */
 export function tagLabel(t: Tag): string {
   return t.label?.trim() ? t.label : t.name;

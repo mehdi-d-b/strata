@@ -239,7 +239,19 @@ export const MultiChart = forwardRef<ChartApi, Props>(function MultiChart(
     series.forEach((s, i) => u.setSeries(i + 1, { show: !s.hidden }));
   }, [series]);
 
-  useEffect(() => () => plot.current?.destroy(), []);
+  useEffect(
+    () => () => {
+      // Sous StrictMode (dev), React monte/démonte/remonte une fois pour détecter les
+      // effets non idempotents : ce cleanup s'exécute donc AUSSI à ce faux démontage.
+      // Sans remettre plot.current à null, la garde "structure inchangée" de l'effet
+      // de création (key === lastKey.current) voit une référence non-nulle (mais
+      // détruite) et saute la recréation -> graphe vide en permanence après le
+      // double-montage. Recréé ici pour de vrai.
+      plot.current?.destroy();
+      plot.current = null;
+    },
+    [],
+  );
 
   return <div ref={ref} className="multichart" />;
 });
