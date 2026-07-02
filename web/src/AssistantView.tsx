@@ -1,9 +1,32 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Bot, ChevronDown, ChevronUp, Eraser, Send } from "lucide-react";
 import { useAssistant, type Msg, type ToolCall } from "./assistant";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+
+// Rendu minimal du markdown inline que le LLM produit (gras/italique/code) — pas de
+// dépendance markdown complète pour ça : le chat n'a besoin que de ces trois formes.
+const MD_INLINE = /(\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)/g;
+
+function renderInlineMarkdown(text: string): ReactNode[] {
+  return text.split(MD_INLINE).map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={i}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return (
+        <code key={i} className="rounded bg-foreground/10 px-1 py-0.5 text-[0.9em]">
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    if (part.startsWith("*") && part.endsWith("*")) {
+      return <em key={i}>{part.slice(1, -1)}</em>;
+    }
+    return part;
+  });
+}
 
 const SUGGESTIONS = [
   "Quel est l'OEE de la ligne blonde aujourd'hui ?",
@@ -62,7 +85,7 @@ function Bubble({ m }: { m: Msg }) {
               : "bg-secondary text-foreground",
         )}
       >
-        {m.content}
+        {isUser || m.error ? m.content : renderInlineMarkdown(m.content)}
         {!isUser && !m.error && m.trace && (
           <TracePanel trace={m.trace} total_ms={m.total_ms} />
         )}
@@ -71,39 +94,40 @@ function Bubble({ m }: { m: Msg }) {
   );
 }
 
-function Thinking({ tools }: { tools: ToolCall[] }) {
+/**
+ * État "en cours" du tour d'assistant : trace des tools déjà appelés (si des tools ont
+ * tourné) puis, dès que le modèle se met à répondre, le texte qui arrive TOKEN PAR TOKEN
+ * (v4 streaming) avec un curseur clignotant — remplace l'ancienne attente "en bloc".
+ */
+function Thinking({ tools, streamingText }: { tools: ToolCall[]; streamingText: string }) {
   return (
     <div className="flex justify-start gap-2">
       <BotAvatar />
-      <div className="rounded-2xl bg-secondary px-4 py-3 text-sm text-muted-foreground">
-        {tools.length === 0 ? (
-          <span className="flex items-center gap-2">
+      <div className="max-w-[80%] rounded-2xl bg-secondary px-4 py-3 text-sm text-muted-foreground">
+        {tools.length > 0 && (
+          <div className="space-y-0.5 font-mono text-[11px]">
+            {tools.map((t, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span className={t.ms != null ? "text-primary/60" : "text-muted-foreground/60"}>{t.name}</span>
+                {t.ms != null ? <span className="opacity-40">{t.ms}ms ✓</span> : <span className="opacity-40 animate-pulse">···</span>}
+              </div>
+            ))}
+          </div>
+        )}
+        {streamingText ? (
+          <div className={cn("whitespace-pre-wrap text-foreground", tools.length > 0 && "mt-2")}>
+            {renderInlineMarkdown(streamingText)}
+            <span className="ml-0.5 inline-block h-[1em] w-0.5 animate-pulse bg-foreground/60 align-text-bottom" />
+          </div>
+        ) : (
+          <span className={cn("flex items-center gap-2", tools.length > 0 && "mt-2")}>
             <span className="flex gap-1">
               {[0, 150, 300].map((d) => (
                 <span key={d} className="size-1.5 animate-bounce rounded-full bg-muted-foreground" style={{ animationDelay: `${d}ms` }} />
               ))}
             </span>
-            Réflexion…
+            {tools.length > 0 ? "en cours…" : "Réflexion…"}
           </span>
-        ) : (
-          <div>
-            <div className="space-y-0.5 font-mono text-[11px]">
-              {tools.map((t, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <span className={t.ms != null ? "text-primary/60" : "text-muted-foreground/60"}>{t.name}</span>
-                  {t.ms != null ? <span className="opacity-40">{t.ms}ms ✓</span> : <span className="opacity-40 animate-pulse">···</span>}
-                </div>
-              ))}
-            </div>
-            <div className="mt-2 flex items-center gap-1.5">
-              <span className="flex gap-1">
-                {[0, 150, 300].map((d) => (
-                  <span key={d} className="size-1 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: `${d}ms` }} />
-                ))}
-              </span>
-              <span className="text-[11px] text-muted-foreground/50">en cours…</span>
-            </div>
-          </div>
         )}
       </div>
     </div>
@@ -111,13 +135,13 @@ function Thinking({ tools }: { tools: ToolCall[] }) {
 }
 
 export function AssistantView() {
-  const { messages, busy, liveTools, send, clear } = useAssistant();
+  const { messages, busy, liveTools, streamingText, send, clear } = useAssistant();
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, busy]);
+  }, [messages, busy, streamingText]);
 
   const submit = (text?: string) => {
     const content = (text ?? input).trim();
@@ -137,7 +161,7 @@ export function AssistantView() {
     <div className="flex h-[calc(100vh-6rem)] flex-col">
       <PageHeader
         title="Assistant"
-        description="Copilote IA local — interroge tes données en langage naturel (lecture seule, via la gateway)."
+        description="Posez une question sur la production, l'OEE, les alarmes ou l'historique."
         actions={
           messages.length > 0 ? (
             <Button size="sm" variant="outline" onClick={clear}>
@@ -158,8 +182,8 @@ export function AssistantView() {
               <div>
                 <div className="font-semibold text-foreground">Assistant Strata</div>
                 <div className="mt-1 max-w-md text-sm text-muted-foreground">
-                  Pose une question sur l'OEE, la production, les alarmes ou l'historique.
-                  L'assistant interroge tes données avec tes droits.
+                  Posez une question sur l'OEE, la production, les alarmes ou l'historique.
+                  Les réponses respectent les droits d'accès du compte connecté.
                 </div>
               </div>
               <div className="flex max-w-xl flex-wrap justify-center gap-2">
@@ -179,7 +203,7 @@ export function AssistantView() {
               {messages.map((m, i) => (
                 <Bubble key={i} m={m} />
               ))}
-              {busy && <Thinking tools={liveTools} />}
+              {busy && <Thinking tools={liveTools} streamingText={streamingText} />}
             </>
           )}
         </div>
@@ -196,7 +220,7 @@ export function AssistantView() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyDown}
             rows={2}
-            placeholder="Pose ta question… (Entrée pour envoyer, Maj+Entrée pour un saut de ligne)"
+            placeholder="Posez une question… (Entrée pour envoyer, Maj+Entrée pour un saut de ligne)"
             className="min-h-0 flex-1 resize-none rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"
           />
           <Button type="submit" size="icon" disabled={busy || !input.trim()} title="Envoyer">

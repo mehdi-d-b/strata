@@ -13,6 +13,7 @@
  * table `tags`. Corriger une échelle répare donc tout l'historique d'un coup.
  */
 import { randomUUID } from "node:crypto";
+import { Socket } from "node:net";
 import Fastify from "fastify";
 import websocket from "@fastify/websocket";
 import { Kafka, logLevel } from "kafkajs";
@@ -179,8 +180,20 @@ async function audit(
   );
 }
 
+// Push WS instantané (Phase C) des alarmes raise/clear : même filtrage RBAC que le
+// flux de mesures (chaque client ne reçoit que les tags qu'il a le droit de lire).
+// `type: "alarm"` distingue ces messages de ceux de mesure (`type: "measure"`) sur
+// le même socket `/ws` — le front reste en polling REST ~7s en filet de rattrapage
+// (reconnexion, 1er chargement), ce push n'est qu'un accélérateur de latence.
+function broadcastAlarm(e: import("./alarms.js").AlarmEvent): void {
+  const out = JSON.stringify({ type: "alarm", alarm: e });
+  for (const [ws, user] of clients) {
+    if (ws.readyState === 1 && can(user, "read", e.tag)) ws.send(out); // 1 = OPEN
+  }
+}
+
 // Moteur d'alarmes (détection de seuils sur tags.raw). Démarré dans main().
-const alarmEngine = new AlarmEngine(pool, audit);
+const alarmEngine = new AlarmEngine(pool, audit, broadcastAlarm);
 // Suivi des batchs (persistance ouverture/clôture depuis les tags <ligne>.batch.*).
 const batchTracker = new BatchTracker(pool, audit);
 
@@ -327,6 +340,69 @@ app.post("/api/storage/compression", { preHandler: requireAdmin }, async (req, r
 });
 
 // ─── Paramètres : Infos système (admin only) ──────────────────────────────
+//
+// État des services vus par la gateway (joignables ou non, depuis SON point de vue
+// réseau interne) — PAS un monitoring infra complet (ça reste Console/Grafana en
+// externe, cf. docs/roadmap.md « Transverse »). Sert surtout à distinguer, pour les
+// profils Docker OPTIONNELS (risingwave/ai/plc4x), "profil non démarré" de "profil
+// démarré mais en panne" — aujourd'hui invisible depuis l'UI.
+type ServiceCheck = { ok: boolean; ms: number };
+
+async function checkTcp(host: string, port: number, timeoutMs = 1500): Promise<ServiceCheck> {
+  const t0 = Date.now();
+  return new Promise((resolve) => {
+    const socket = new Socket();
+    const done = (ok: boolean) => {
+      socket.destroy();
+      resolve({ ok, ms: Date.now() - t0 });
+    };
+    socket.setTimeout(timeoutMs);
+    socket.once("connect", () => done(true));
+    socket.once("timeout", () => done(false));
+    socket.once("error", () => done(false));
+    socket.connect(port, host);
+  });
+}
+
+async function checkHttp(url: string, timeoutMs = 1500): Promise<ServiceCheck> {
+  const t0 = Date.now();
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    return { ok: r.ok, ms: Date.now() - t0 };
+  } catch {
+    return { ok: false, ms: Date.now() - t0 };
+  }
+}
+
+async function checkPg(timeoutMs = 1500): Promise<ServiceCheck> {
+  const t0 = Date.now();
+  try {
+    await Promise.race([
+      pool.query("SELECT 1"),
+      new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), timeoutMs)),
+    ]);
+    return { ok: true, ms: Date.now() - t0 };
+  } catch {
+    return { ok: false, ms: Date.now() - t0 };
+  }
+}
+
+async function checkKafka(timeoutMs = 1500): Promise<ServiceCheck> {
+  const t0 = Date.now();
+  const admin = kafka.admin();
+  try {
+    await Promise.race([
+      admin.connect(),
+      new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), timeoutMs)),
+    ]);
+    return { ok: true, ms: Date.now() - t0 };
+  } catch {
+    return { ok: false, ms: Date.now() - t0 };
+  } finally {
+    await admin.disconnect().catch(() => {});
+  }
+}
+
 app.get("/api/system", { preHandler: requireAdmin }, async () => {
   const counts = await pool.query(
     `SELECT
@@ -336,25 +412,49 @@ app.get("/api/system", { preHandler: requireAdmin }, async () => {
        (SELECT count(*) FROM mesures)::bigint AS mesures`,
   );
   const ver = await pool.query("SELECT extversion FROM pg_extension WHERE extname='timescaledb'");
-  // État des connecteurs Kafka Connect (si le profil plc4x tourne).
-  let connectors: { name: string; state: string }[] = [];
-  try {
-    const r = await fetch(`${process.env.KAFKA_CONNECT_URL ?? "http://kafka-connect:8083"}/connectors?expand=status`);
-    if (r.ok) {
+
+  // Connecteurs Kafka Connect (si le profil plc4x tourne) + joignabilité du service.
+  const connectUrl = process.env.KAFKA_CONNECT_URL ?? "http://kafka-connect:8083";
+  const kafkaConnect = await (async () => {
+    const t0 = Date.now();
+    try {
+      const r = await fetch(`${connectUrl}/connectors?expand=status`, { signal: AbortSignal.timeout(1500) });
+      if (!r.ok) return { ok: false, ms: Date.now() - t0, connectors: [] as { name: string; state: string }[] };
       const data = (await r.json()) as Record<string, { status?: { connector?: { state?: string } } }>;
-      connectors = Object.entries(data).map(([name, v]) => ({
-        name,
-        state: v.status?.connector?.state ?? "?",
-      }));
+      return {
+        ok: true,
+        ms: Date.now() - t0,
+        connectors: Object.entries(data).map(([name, v]) => ({
+          name,
+          state: v.status?.connector?.state ?? "?",
+        })),
+      };
+    } catch {
+      return { ok: false, ms: Date.now() - t0, connectors: [] as { name: string; state: string }[] };
     }
-  } catch {
-    /* Kafka Connect non démarré : pas de connecteurs à lister */
-  }
+  })();
+
+  // Services optionnels : "non joignable" = profil non démarré OU en panne — on ne
+  // distingue pas les deux (la gateway ne voit que de l'intérieur, cf. commentaire ci-dessus).
+  const [pgCheck, kafkaCheck, ollamaCheck, risingwaveCheck] = await Promise.all([
+    checkPg(),
+    checkKafka(),
+    checkHttp(`${process.env.OLLAMA_URL ?? "http://ollama:11434"}/api/tags`),
+    checkTcp("risingwave", 4566),
+  ]);
+
   return {
     counts: counts.rows[0],
     timescaledb_version: ver.rows[0]?.extversion ?? "?",
     node_version: process.version,
-    connectors,
+    connectors: kafkaConnect.connectors,
+    services: [
+      { name: "timescaledb", label: "TimescaleDB", reachable: pgCheck.ok, ms: pgCheck.ms },
+      { name: "redpanda", label: "Redpanda (Kafka)", reachable: kafkaCheck.ok, ms: kafkaCheck.ms },
+      { name: "kafka-connect", label: "Kafka Connect (PLC4X)", reachable: kafkaConnect.ok, ms: kafkaConnect.ms },
+      { name: "ollama", label: "Ollama (assistant IA)", reachable: ollamaCheck.ok, ms: ollamaCheck.ms },
+      { name: "risingwave", label: "RisingWave", reachable: risingwaveCheck.ok, ms: risingwaveCheck.ms },
+    ],
   };
 });
 
@@ -552,19 +652,27 @@ app.get("/api/batches", { preHandler: requireAuth }, async (req) => {
   return rows;
 });
 
-// Historique des alarmes (pour plus tard).
+// Historique daté des alarmes. `tag` optionnel (utilisé pour les indicateurs en
+// contexte dans Explorer/Dashboards — superposer les fenêtres d'alarme sur un graphe).
 app.get("/api/alarms/history", { preHandler: requireAuth }, async (req) => {
-  const q = req.query as { from?: string; to?: string; limit?: string };
+  const q = req.query as { from?: string; to?: string; limit?: string; tag?: string };
   const limit = Math.min(1000, Number(q.limit) || 200);
   const from = q.from ? new Date(q.from) : new Date(Date.now() - 7 * 86400_000);
   const to = q.to ? new Date(q.to) : new Date();
+  const params: unknown[] = [from.toISOString(), to.toISOString()];
+  let tagFilter = "";
+  if (q.tag) {
+    params.push(q.tag);
+    tagFilter = `AND tag = $${params.length}`;
+  }
+  params.push(limit);
   const { rows } = await pool.query(
     `SELECT id, rule_id, source, tag, severity, message, value, state,
             raised_at, cleared_at, acked, acked_by, acked_at
      FROM alarms
-     WHERE raised_at >= $1 AND raised_at <= $2
-     ORDER BY raised_at DESC LIMIT $3`,
-    [from.toISOString(), to.toISOString(), limit],
+     WHERE raised_at >= $1 AND raised_at <= $2 ${tagFilter}
+     ORDER BY raised_at DESC LIMIT $${params.length}`,
+    params,
   );
   return rows;
 });
@@ -899,6 +1007,62 @@ app.get("/api/oee/downtime/events", async (req) => {
     [days, q.line ?? "", minMinutes],
   );
   return rows;
+});
+
+// Calendrier d'arrêts planifiés DÉCLARÉS À L'AVANCE (maintenance, fermeture/congés...) —
+// distinct de l'étiquetage a posteriori (/api/oee/stops/label) : couvre un arrêt encore
+// EN COURS ou une fermeture longue sans données. `line=null` = toute l'usine. Cf.
+// infra/timescale/init/13-oee-planned-calendar.sql.
+app.get("/api/planned-stops", async (req) => {
+  const q = req.query as { days?: string };
+  const days = Number(q.days ?? 60);
+  const { rows } = await pool.query(
+    `SELECT ps.id, ps.line, ol.label AS line_label, ps.reason_code, sr.label AS reason_label,
+            ps.start_ts, ps.end_ts, ps.note, ps.created_by, ps.created_at
+     FROM planned_stop ps
+     LEFT JOIN oee_line   ol ON ol.line = ps.line
+     JOIN      stop_reason sr ON sr.code = ps.reason_code
+     WHERE ps.end_ts > now() - ($1 || ' days')::interval
+     ORDER BY ps.start_ts DESC`,
+    [days],
+  );
+  return rows;
+});
+
+app.post("/api/planned-stops", { preHandler: requireAdmin }, async (req, reply) => {
+  const b = req.body as {
+    line?: string | null;
+    reason_code?: string;
+    start_ts?: string;
+    end_ts?: string;
+    note?: string;
+  };
+  if (!b.reason_code || !b.start_ts || !b.end_ts)
+    return reply.code(400).send({ error: "reason_code, start_ts, end_ts requis" });
+  const start = new Date(b.start_ts);
+  const end = new Date(b.end_ts);
+  if (isNaN(start.getTime()) || isNaN(end.getTime()))
+    return reply.code(400).send({ error: "start_ts/end_ts doivent être des dates ISO 8601 valides" });
+  if (end <= start) return reply.code(400).send({ error: "end_ts doit être après start_ts" });
+  const id = randomUUID();
+  await pool.query(
+    `INSERT INTO planned_stop (id, line, reason_code, start_ts, end_ts, note, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [id, b.line || null, b.reason_code, start.toISOString(), end.toISOString(), b.note ?? null, req.user!.username],
+  );
+  await audit(req.user!.username, "planned_stop.create", b.line ?? "*", {
+    reason_code: b.reason_code,
+    start_ts: b.start_ts,
+    end_ts: b.end_ts,
+  });
+  return { id, ok: true };
+});
+
+app.delete("/api/planned-stops/:id", { preHandler: requireAdmin }, async (req) => {
+  const { id } = req.params as { id: string };
+  await pool.query("DELETE FROM planned_stop WHERE id = $1", [id]);
+  await audit(req.user!.username, "planned_stop.delete", id);
+  return { ok: true };
 });
 
 // ─── Assistant IA local (profil `ai`, Ollama) — cf. docs/llm-integration.md ──
@@ -1404,7 +1568,9 @@ async function startConsumer() {
       }
       // On pousse la valeur SCALÉE au navigateur (cohérent avec l'historique),
       // mais SEULEMENT aux clients qui ont le droit de LIRE ce tag (filtrage RBAC).
-      const out = JSON.stringify({ ...m, value });
+      // `type: "measure"` distingue ce message des pushs d'alarme (cf. broadcastAlarm)
+      // sur le même socket `/ws`.
+      const out = JSON.stringify({ type: "measure", ...m, value });
       for (const [ws, user] of clients) {
         if (ws.readyState === 1 && can(user, "read", m.tag)) ws.send(out); // 1 = OPEN
       }

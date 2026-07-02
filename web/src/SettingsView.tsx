@@ -122,6 +122,7 @@ function AccountSection() {
 function DisplaySection() {
   const [win, setWin] = useState(loadPrefs().defaultWindowSec);
   const [alarmToasts, setAlarmToasts] = useState(loadPrefs().alarmToasts);
+  const [alarmSound, setAlarmSound] = useState(loadPrefs().alarmSound);
   const { density, setDensity } = useDensity();
 
   const save = () => {
@@ -142,6 +143,19 @@ function DisplaySection() {
             }}
           />
           Afficher les notifications d'alarme (toasts en bas à droite)
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={alarmSound}
+            disabled={!alarmToasts}
+            onChange={(e) => {
+              setAlarmSound(e.target.checked);
+              savePrefs({ alarmSound: e.target.checked });
+            }}
+          />
+          Jouer un son à la nouvelle alarme
+          {!alarmToasts && <span className="text-muted-foreground"> (active les notifications ci-dessus)</span>}
         </label>
         <Field label="Densité d'affichage">
           <select
@@ -287,6 +301,34 @@ function SystemSection() {
         <KpiCard label="Utilisateurs" value={sys.counts.users} />
         <KpiCard label="Mesures" value={sys.counts.mesures} />
       </div>
+
+      <Section
+        title="Services"
+        hint="Vus depuis la gateway. Pour les profils optionnels (RisingWave, Ollama, PLC4X), « injoignable » veut dire non démarré OU en panne — le détail reste dans Redpanda Console / les logs."
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Service</TableHead>
+              <TableHead>État</TableHead>
+              <TableHead>Latence</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sys.services.map((s) => (
+              <TableRow key={s.name}>
+                <TableCell>{s.label}</TableCell>
+                <TableCell>
+                  <span className={`status ${s.reachable ? "live" : "off"}`}>
+                    {s.reachable ? "Joignable" : "Injoignable"}
+                  </span>
+                </TableCell>
+                <TableCell className="tabular-nums text-muted-foreground">{s.ms} ms</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Section>
 
       <Section title="Versions">
         <Table>

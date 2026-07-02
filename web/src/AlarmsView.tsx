@@ -4,9 +4,11 @@ import { toast } from "sonner";
 import {
   ALARM_OPERATORS,
   deleteAlarmRule,
+  fetchAlarmHistory,
   fetchAlarmRules,
   saveAlarmRule,
   userIsAdmin,
+  type Alarm,
   type AlarmOperator,
   type AlarmRule,
   type Severity,
@@ -61,7 +63,7 @@ function since(iso: string): string {
   return new Date(iso).toLocaleString();
 }
 
-type Tab = "current" | "rules";
+type Tab = "current" | "history" | "rules";
 
 export function AlarmsView() {
   const { user } = useAuth();
@@ -74,19 +76,127 @@ export function AlarmsView() {
         title="Alarmes"
         description="Alarmes actives et configuration des seuils."
       />
-      {admin && (
-        <TabBar
-          tabs={[
-            { id: "current", label: "Alarmes courantes" },
-            { id: "rules", label: "Règles de seuil" },
-          ]}
-          value={tab}
-          onChange={setTab}
-        />
-      )}
-      {(!admin || tab === "current") && <CurrentSection />}
+      <TabBar
+        tabs={[
+          { id: "current", label: "Alarmes courantes" },
+          { id: "history", label: "Historique" },
+          ...(admin ? [{ id: "rules" as const, label: "Règles de seuil" }] : []),
+        ]}
+        value={tab}
+        onChange={setTab}
+      />
+      {tab === "current" && <CurrentSection />}
+      {tab === "history" && <HistorySection />}
       {admin && tab === "rules" && <RulesSection />}
     </>
+  );
+}
+
+// ─── Historique daté ──────────────────────────────────────────────────────
+
+const HISTORY_DAYS = [
+  { label: "24 h", v: 1 },
+  { label: "7 jours", v: 7 },
+  { label: "30 jours", v: 30 },
+];
+
+function duration(a: Alarm): string {
+  const end = a.cleared_at ? new Date(a.cleared_at).getTime() : Date.now();
+  const s = Math.max(0, Math.floor((end - new Date(a.raised_at).getTime()) / 1000));
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.floor(s / 60)} min`;
+  if (s < 86400) return `${(s / 3600).toFixed(1)} h`;
+  return `${(s / 86400).toFixed(1)} j`;
+}
+
+function HistorySection() {
+  const [days, setDays] = useState(7);
+  const [sev, setSev] = useState<Severity | "all">("all");
+  const [rows, setRows] = useState<Alarm[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    const to = new Date().toISOString();
+    const from = new Date(Date.now() - days * 86400_000).toISOString();
+    fetchAlarmHistory(from, to, { limit: 1000 })
+      .then(setRows)
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false));
+  }, [days]);
+
+  const filtered = rows.filter((a) => sev === "all" || a.severity === sev);
+
+  return (
+    <Section title="Historique" hint="Toutes les alarmes levées dans la fenêtre, actives ou déjà rétablies.">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="flex gap-1">
+          {HISTORY_DAYS.map((d) => (
+            <button
+              key={d.v}
+              onClick={() => setDays(d.v)}
+              className={cn(
+                "rounded-md border px-2.5 py-1 text-xs",
+                days === d.v
+                  ? "border-primary bg-card text-foreground"
+                  : "border-border bg-secondary text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {d.label}
+            </button>
+          ))}
+        </div>
+        <select value={sev} onChange={(e) => setSev(e.target.value as Severity | "all")}>
+          <option value="all">Toutes sévérités</option>
+          {SEVERITIES.map((s) => (
+            <option key={s} value={s}>
+              {SEV_LABEL[s]}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Sévérité</TableHead>
+            <TableHead>Tag</TableHead>
+            <TableHead>Message</TableHead>
+            <TableHead>Levée</TableHead>
+            <TableHead>Durée</TableHead>
+            <TableHead>Acquittée par</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {filtered.map((a) => (
+            <TableRow key={a.id}>
+              <TableCell>
+                <SeverityBadge severity={a.severity} />
+              </TableCell>
+              <TableCell>
+                <code className="text-[var(--chart-2)]">{a.tag}</code>
+              </TableCell>
+              <TableCell>{a.message}</TableCell>
+              <TableCell className="tabular-nums text-muted-foreground whitespace-nowrap">
+                {new Date(a.raised_at).toLocaleString()}
+              </TableCell>
+              <TableCell className="tabular-nums">
+                {duration(a)}
+                {a.state === "active" && <span className="ml-1 text-bad">● en cours</span>}
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">{a.acked_by ?? "—"}</TableCell>
+            </TableRow>
+          ))}
+          {!loading && filtered.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={6} className="text-muted-foreground">
+                Aucune alarme sur cette période.
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+    </Section>
   );
 }
 

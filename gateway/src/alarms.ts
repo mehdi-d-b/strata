@@ -44,6 +44,23 @@ type RuleState = {
   condSince: number | null; // depuis quand la condition est vraie (anti-rebond), ms epoch
 };
 
+/** Même forme que le type `Alarm` du front (web/src/api.ts) — poussée sur `/ws`. */
+export type AlarmEvent = {
+  id: string;
+  rule_id: string | null;
+  source: "rule";
+  tag: string;
+  severity: Severity;
+  message: string;
+  value: number | null;
+  state: "active" | "cleared";
+  raised_at: string;
+  cleared_at: string | null;
+  acked: boolean;
+  acked_by: null;
+  acked_at: null;
+};
+
 export class AlarmEngine {
   private rules: AlarmRule[] = [];
   private byTag = new Map<string, AlarmRule[]>();
@@ -60,6 +77,10 @@ export class AlarmEngine {
   constructor(
     private pool: pg.Pool,
     private audit: (user: string | null, action: string, target?: string | null, detail?: unknown) => Promise<void>,
+    // Push WS instantané (Phase C) : appelé à chaque raise/clear, en plus du
+    // polling REST ~7s côté front qui reste le filet de rattrapage (reconnexion,
+    // 1er chargement). Optionnel : l'engine fonctionne à l'identique sans (tests).
+    private onEvent?: (e: AlarmEvent) => void,
   ) {}
 
   /** Recharge les règles depuis la base (appelé périodiquement). */
@@ -217,13 +238,14 @@ export class AlarmEngine {
 
   private async raise(rule: AlarmRule, value: number, now: number): Promise<void> {
     const id = randomUUID();
+    const message = this.defaultMessage(rule);
     // ON CONFLICT : si une alarme active existe déjà pour cette règle (garde
     // anti-spam via l'index unique partiel), on ne crée pas de doublon.
     const res = await this.pool.query(
       `INSERT INTO alarms (id, rule_id, source, tag, severity, message, value, state, raised_at)
        VALUES ($1, $2, 'rule', $3, $4, $5, $6, 'active', to_timestamp($7 / 1000.0))
        ON CONFLICT DO NOTHING`,
-      [id, rule.id, rule.tag, rule.severity, this.defaultMessage(rule), value, now],
+      [id, rule.id, rule.tag, rule.severity, message, value, now],
     );
     if (res.rowCount && res.rowCount > 0) {
       await this.audit(null, "alarm.raise", rule.tag, {
@@ -231,17 +253,49 @@ export class AlarmEngine {
         severity: rule.severity,
         value,
       });
+      this.onEvent?.({
+        id,
+        rule_id: rule.id,
+        source: "rule",
+        tag: rule.tag,
+        severity: rule.severity,
+        message,
+        value,
+        state: "active",
+        raised_at: new Date(now).toISOString(),
+        cleared_at: null,
+        acked: false,
+        acked_by: null,
+        acked_at: null,
+      });
     }
   }
 
   private async clear(rule: AlarmRule, now: number): Promise<void> {
     const res = await this.pool.query(
       `UPDATE alarms SET state = 'cleared', cleared_at = to_timestamp($2 / 1000.0)
-       WHERE rule_id = $1 AND state = 'active'`,
+       WHERE rule_id = $1 AND state = 'active'
+       RETURNING id, severity, message, value, raised_at, acked`,
       [rule.id, now],
     );
     if (res.rowCount && res.rowCount > 0) {
       await this.audit(null, "alarm.clear", rule.tag, { rule_id: rule.id });
+      const r = res.rows[0];
+      this.onEvent?.({
+        id: r.id,
+        rule_id: rule.id,
+        source: "rule",
+        tag: rule.tag,
+        severity: r.severity,
+        message: r.message,
+        value: r.value,
+        state: "cleared",
+        raised_at: new Date(r.raised_at).toISOString(),
+        cleared_at: new Date(now).toISOString(),
+        acked: r.acked,
+        acked_by: null,
+        acked_at: null,
+      });
     }
   }
 }

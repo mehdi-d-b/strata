@@ -174,7 +174,8 @@ calcul.
 | `day` | date (`YYYY-MM-DD`) | jour |
 | `shift_no`, `shift_label` | int, string\|null | shift |
 | `ok`, `produced` | number\|null | bonnes pièces / total |
-| `run_minutes`, `planned_minutes` | number\|null | marche / planifié (pour tooltips & waterfall) |
+| `run_minutes`, `planned_minutes` | number\|null | marche / durée BRUTE (calendaire) du shift (pour tooltips & waterfall) |
+| `planned_downtime_minutes` | number\|null | minutes retirées du PPT pour la Dispo : arrêts étiquetés `planned` (a posteriori) + arrêts du calendrier `planned_stop` (à l'avance), sans double-compte. `availability = run_minutes / (planned_minutes − planned_downtime_minutes)` |
 | `ideal_rate` | number | cadence nominale (pièces/min) |
 | `availability`, `performance`, `quality` | number\|null | **0..1** (facteurs A/P/Q) |
 | `oee` | number\|null | **0..1** = A×P×Q |
@@ -240,8 +241,38 @@ reclassements y remontent directement (un arrêt classé « changement de série
 préférer à `/api/oee/downtime` (bucket 15 min) pour la **dispo** ; le bucket garde l'avantage du
 motif **perf** « Attente amont » (qui n'est pas un arrêt). Idéal : combiner les deux côté front.
 
-*v2 restant* : codes motif PLC (auto), durées exactes (sub-bucket), distinction planifié/non
-planifié **dans le calcul de l'OEE** (sortir les arrêts planifiés du temps planifié).
+**Planifié/non-planifié dans le calcul — fait (2026-07-02).** `oee_stop_intervals` +
+`oee_planned_downtime_by_shift` (`infra/timescale/init/18-oee-planned-downtime.sql`) agrègent,
+par ligne × shift, les minutes des arrêts dont le motif EFFECTIF (label opérateur sinon dérivé)
+est `stop_reason.planned` — branchées dans `oee_by_shift` : la Dispo divise désormais par
+`planned_minutes − planned_downtime_minutes` (PPT net) au lieu de la durée brute du shift.
+`planned_minutes` reste la durée BRUTE (sert aussi à `elapsed_minutes`/la projection, qui ne
+doivent pas rétrécir avec une pause). Validé en live : un arrêt de ~14 min étiqueté `cleaning`
+fait passer la Dispo de 0,282 à 0,329 sur le shift concerné, sans toucher `run_minutes`.
+⚠️ Ne fonctionne que pour les arrêts déjà **étiquetés par l'opérateur** comme planifiés (les
+motifs dérivés seuls ne le sont jamais) — pas de calendrier de pauses déclaré à l'avance
+(reste *v2 restant*, cf. ci-dessous).
+
+**Calendrier d'arrêts planifiés (à l'avance) — fait (2026-07-02).** Table `planned_stop`
+(`infra/timescale/init/19-oee-planned-calendar.sql`) : plages datées explicites (pas de moteur
+de récurrence — les petites pauses quotidiennes restent couvertes par l'étiquetage a posteriori
+ci-dessus), `line` NULL = toute l'usine (fermeture/congés) sinon une ligne précise (maintenance).
+`oee_planned_calendar_by_shift` calcule le recouvrement (minutes) entre chaque plage déclarée et
+la fenêtre réelle du shift — **indépendant des capteurs**, donc correct même pour un arrêt encore
+en cours ou une ligne totalement éteinte. `oee_planned_downtime_by_shift` est redéfinie pour
+exclure (anti-double-comptage) tout arrêt étiqueté qui recouvre déjà une entrée du calendrier ;
+`oee_by_shift.planned_downtime_minutes` = somme des deux sources. Nouveau motif catalogue
+`shutdown` (Fermeture/congés, `planned=true`). API : `GET/POST /api/planned-stops`,
+`DELETE /api/planned-stops/:id` (écriture réservée admin, cf. `requireAdmin` — même tier que
+`/api/shifts`). UI : onglet **OEE → Configuration**, section « Arrêts planifiés (calendrier) »
+(à côté de « Lignes OEE »/« Objectifs par ligne » — pas la page Production : le sibling direct,
+« Arrêts à classer », vit déjà sur la page OEE, pas Production). Validé en live via l'API réelle :
+un arrêt maintenance de 30 min déclaré sur `brasserie.jalapeno` fait passer la Dispo de 0,282 à
+0,398 sur le shift concerné.
+
+*v2 restant* : codes motif PLC (auto), durées exactes (sub-bucket, hors du chemin déjà exact
+`/api/oee/stops`/`/api/oee/downtime/events` — reste approximatif dans `oee_downtime_by_shift`,
+bucket 15 min).
 
 ### Pré-requis de données (à savoir)
 - Les compteurs de la ligne doivent avoir les **rôles `ok`/`scrap`** (`tag_role`). Pour la démo

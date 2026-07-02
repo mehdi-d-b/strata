@@ -54,12 +54,15 @@ export function useRealtimeBuffers(opts: RealtimeOptions) {
     ws.onopen = () => opts.onLive?.(true);
     ws.onclose = () => opts.onLive?.(false);
     ws.onmessage = (ev) => {
-      let m: Mesure;
+      let m: Mesure & { type?: string };
       try {
         m = JSON.parse(ev.data);
       } catch {
         return;
       }
+      // `/ws` porte aussi les pushs d'alarme (type "alarm") depuis Phase C — on ne
+      // traite ici que les mesures.
+      if (m.type !== "measure") return;
       if (!tagsRef.current.includes(m.tag)) return;
       let buf = buffers.current.get(m.tag);
       if (!buf) {

@@ -19,12 +19,13 @@ import {
   tagLabel,
   updateDashboard,
   type DashboardPanel as PanelType,
+  fetchAlarmHistory,
   type DashboardRange,
   type DashboardSpec,
   type PanelSeries,
   type Tag,
 } from "./api";
-import { MultiChart, type SeriesDef } from "./MultiChart";
+import { MultiChart, type AlarmBand, type SeriesDef } from "./MultiChart";
 import { chartPalette } from "./chartTheme";
 import { useTheme } from "./theme";
 import { alignSeries } from "./series";
@@ -307,6 +308,7 @@ function Panel({
   const { theme } = useTheme();
   const palette = useMemo(() => chartPalette(), [theme]);
   const [data, setData] = useState<uPlot.AlignedData>([[]]);
+  const [alarmBands, setAlarmBands] = useState<AlarmBand[]>([]);
 
   const seriesKey = panel.series.map((s) => `${s.tag}|${s.axis}`).join(",");
   useEffect(() => {
@@ -318,6 +320,40 @@ function Panel({
     loadPanelData(panel.series, range).then((d) => {
       if (!cancelled) setData(d);
     });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seriesKey, range, tick]);
+
+  // Indicateurs d'alarme en contexte (Phase C) : une bande par fenêtre d'alarme,
+  // fusionnée sur tous les tags du panneau. Même déclencheur de rechargement que
+  // les données (range/tick) — pas de logique de rafraîchissement séparée.
+  useEffect(() => {
+    let cancelled = false;
+    if (panel.series.length === 0) {
+      setAlarmBands([]);
+      return;
+    }
+    const fromIso =
+      range.mode === "relative"
+        ? new Date(Date.now() - range.sec * 1000).toISOString()
+        : new Date(range.from).toISOString();
+    const toIso =
+      range.mode === "relative" ? new Date().toISOString() : new Date(range.to).toISOString();
+    const tags = [...new Set(panel.series.map((s) => s.tag))];
+    Promise.all(tags.map((tag) => fetchAlarmHistory(fromIso, toIso, { tag }).catch(() => [])))
+      .then((lists) => {
+        if (cancelled) return;
+        setAlarmBands(
+          lists.flat().map((a) => ({
+            from: new Date(a.raised_at).getTime() / 1000,
+            to: (a.cleared_at ? new Date(a.cleared_at).getTime() : Date.now()) / 1000,
+            severity: a.severity,
+          })),
+        );
+      })
+      .catch(() => setAlarmBands([]));
     return () => {
       cancelled = true;
     };
@@ -365,7 +401,7 @@ function Panel({
             Aucun tag — édite le panneau pour en ajouter.
           </div>
         ) : (
-          <MultiChart data={data} series={series} height={260} />
+          <MultiChart data={data} series={series} height={260} alarmBands={alarmBands} />
         )}
       </CardContent>
     </Card>

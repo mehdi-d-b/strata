@@ -10,12 +10,15 @@ export type Prefs = {
   density: Density;
   /** Afficher les toasts à l'apparition d'une alarme. */
   alarmToasts: boolean;
+  /** Jouer un son à l'apparition d'une nouvelle alarme active. */
+  alarmSound: boolean;
 };
 
 const DEFAULTS: Prefs = {
   defaultWindowSec: 300,
   density: "comfortable",
   alarmToasts: true,
+  alarmSound: false,
 };
 
 export function loadPrefs(): Prefs {

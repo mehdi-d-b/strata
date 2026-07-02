@@ -14,6 +14,14 @@ export type SeriesDef = {
   hidden?: boolean;
 };
 
+/** Fenêtre où une alarme était active — indicateur en contexte (Phase C). */
+export type AlarmBand = {
+  /** Timestamps EN SECONDES (même unité que l'axe X uPlot). */
+  from: number;
+  to: number;
+  severity: "critical" | "warning" | "info";
+};
+
 /** API impérative exposée par le graphe (contrôles externes). */
 export type ChartApi = {
   /** Réinitialise le zoom : ré-auto-range sur l'étendue des données. */
@@ -27,11 +35,39 @@ type Props = {
   height?: number;
   /** Appelé quand l'utilisateur zoome au glisser (pour auto-mettre en pause). */
   onUserZoom?: () => void;
+  /** Bandes verticales teintées derrière le graphe, une par fenêtre d'alarme. */
+  alarmBands?: AlarmBand[];
 };
 
 /** Signature qui déclenche la RECRÉATION du plot (structure des séries changée). */
 function structureKey(series: SeriesDef[]): string {
   return series.map((s) => `${s.tag}|${s.color}|${s.axis}|${s.unit ?? ""}`).join(",");
+}
+
+const ALARM_BAND_COLOR: Record<AlarmBand["severity"], string> = {
+  critical: "rgba(220,38,38,0.14)",
+  warning: "rgba(217,119,6,0.14)",
+  info: "rgba(37,99,235,0.12)",
+};
+
+/** Peint les fenêtres d'alarme en fond, AVANT séries/grille (hook drawClear = sous tout). */
+function alarmBandsPlugin(bands: AlarmBand[]): uPlot.Plugin {
+  return {
+    hooks: {
+      drawClear: (u) => {
+        if (bands.length === 0) return;
+        const ctx = u.ctx;
+        ctx.save();
+        for (const b of bands) {
+          const x0 = u.valToPos(b.from, "x", true);
+          const x1 = u.valToPos(b.to, "x", true);
+          ctx.fillStyle = ALARM_BAND_COLOR[b.severity];
+          ctx.fillRect(x0, u.bbox.top, Math.max(1, x1 - x0), u.bbox.height);
+        }
+        ctx.restore();
+      },
+    },
+  };
 }
 
 /**
@@ -119,7 +155,7 @@ function tooltipPlugin(series: SeriesDef[]): uPlot.Plugin {
 
 /** Graphe uPlot multi-séries : deux échelles indépendantes, tooltip multi-séries. */
 export const MultiChart = forwardRef<ChartApi, Props>(function MultiChart(
-  { data, series, height = 420, onUserZoom },
+  { data, series, height = 420, onUserZoom, alarmBands = [] },
   apiRef,
 ) {
   const ref = useRef<HTMLDivElement>(null);
@@ -148,7 +184,8 @@ export const MultiChart = forwardRef<ChartApi, Props>(function MultiChart(
     // l'auto-range au premier setData. + `theme` => recréation au toggle (couleurs
     // canvas figées à la création).
     const hasData = ((data[0] as number[] | undefined)?.length ?? 0) > 0;
-    const key = structureKey(series) + theme + (hasData ? "#data" : "#empty");
+    const key =
+      structureKey(series) + theme + (hasData ? "#data" : "#empty") + JSON.stringify(alarmBands);
     if (plot.current && key === lastKey.current) return; // structure inchangée
     lastKey.current = key;
     plot.current?.destroy();
@@ -207,6 +244,7 @@ export const MultiChart = forwardRef<ChartApi, Props>(function MultiChart(
       axes,
       plugins: [
         tooltipPlugin(series),
+        alarmBandsPlugin(alarmBands),
         // Détecte le zoom au glisser pour prévenir le parent (auto-pause).
         {
           hooks: {
@@ -225,7 +263,7 @@ export const MultiChart = forwardRef<ChartApi, Props>(function MultiChart(
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [series, height, data, theme]);
+  }, [series, height, data, theme, alarmBands]);
 
   // Mise à jour des données sans recréer le plot (toujours bien dimensionnée).
   useEffect(() => {

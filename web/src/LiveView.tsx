@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type uPlot from "uplot";
 import { Calendar, Download, Pause, Play, RotateCcw } from "lucide-react";
-import { MultiChart, type ChartApi, type SeriesDef } from "./MultiChart";
+import { MultiChart, type AlarmBand, type ChartApi, type SeriesDef } from "./MultiChart";
 import { useRealtimeBuffers } from "./useRealtimeBuffers";
 import { CommandBox } from "./CommandBox";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { useTheme } from "./theme";
 import { chartPalette } from "./chartTheme";
 import { loadPrefs } from "./prefs";
 import {
+  fetchAlarmHistory,
   fetchHistory,
   fetchHistoryRange,
   fetchTags,
@@ -86,6 +87,9 @@ export function LiveView() {
   const [paused, setPaused] = useState(false);
 
   const [data, setData] = useState<uPlot.AlignedData>([[]]);
+  // Indicateurs d'alarme en contexte (Phase C) : uniquement en mode historique
+  // (absolu) — en direct, la page Alarmes/le badge suffisent pour le temps réel.
+  const [alarmBands, setAlarmBands] = useState<AlarmBand[]>([]);
 
   const isLive = range.mode === "relative";
   const liveSec = range.mode === "relative" ? range.sec : 300;
@@ -302,6 +306,38 @@ export function LiveView() {
   useEffect(() => {
     if (range.mode !== "absolute") return;
     loadAbsolute(range.from, range.to, selected);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range, selectedTags]);
+
+  // Indicateurs d'alarme en contexte (Phase C), même déclencheur que ci-dessus.
+  // Uniquement en historique (cf. commentaire sur l'état `alarmBands`).
+  useEffect(() => {
+    if (range.mode !== "absolute") {
+      setAlarmBands([]);
+      return;
+    }
+    if (selectedTags.length === 0) {
+      setAlarmBands([]);
+      return;
+    }
+    let cancelled = false;
+    const fromIso = new Date(range.from).toISOString();
+    const toIso = new Date(range.to).toISOString();
+    Promise.all(
+      selectedTags.map((tag) => fetchAlarmHistory(fromIso, toIso, { tag }).catch(() => [])),
+    ).then((lists) => {
+      if (cancelled) return;
+      setAlarmBands(
+        lists.flat().map((a) => ({
+          from: new Date(a.raised_at).getTime() / 1000,
+          to: (a.cleared_at ? new Date(a.cleared_at).getTime() : Date.now()) / 1000,
+          severity: a.severity,
+        })),
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range, selectedTags]);
 
@@ -576,6 +612,7 @@ export function LiveView() {
               data={data}
               series={seriesForChart}
               onUserZoom={onUserZoom}
+              alarmBands={alarmBands}
             />
           )}
         </div>

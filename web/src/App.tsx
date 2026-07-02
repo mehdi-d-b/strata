@@ -5,7 +5,6 @@ import { LiveView } from "./LiveView";
 import { DashboardsView } from "./DashboardsView";
 import { DashboardView } from "./DashboardView";
 import { AlarmsView } from "./AlarmsView";
-import { HealthView } from "./HealthView";
 import { OeeView } from "./OeeView";
 import { AssistantView } from "./AssistantView";
 import { TagsView } from "./TagsView";
@@ -41,7 +40,6 @@ export function App() {
           <Route path="dashboards" element={<DashboardsView />} />
           <Route path="dashboards/:id" element={<DashboardView />} />
           <Route path="alarms" element={<AlarmsView />} />
-          <Route path="health" element={<HealthView />} />
           <Route path="oee" element={<OeeView />} />
           <Route path="assistant" element={<AssistantView />} />
           {/* Ancien chemin -> nouveau (compat liens existants) */}

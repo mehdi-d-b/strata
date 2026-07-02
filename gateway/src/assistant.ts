@@ -815,6 +815,7 @@ function agentLog(runId: string, event: Record<string, unknown>) {
 export type AgentEvent =
   | { type: "tool_call"; step: number; name: string }
   | { type: "tool_result"; step: number; name: string; ms: number; result_bytes: number }
+  | { type: "token"; step: number; content: string }
   | { type: "answer"; answer: string; steps: number; total_ms: number };
 
 export async function runAssistant(
@@ -884,6 +885,12 @@ export async function runAssistant(
     // API NATIVE Ollama (/api/chat) : elle honore `num_ctx` (l'endpoint /v1 compatible
     // OpenAI l'ignore → contexte resté à ~2048, d'où les troncatures). qwen2.5 va
     // jusqu'à 32k ; 8192 suffit largement pour prompt + tools + résultats.
+    //
+    // stream:true (v4 streaming) : le texte d'une réponse finale (pas d'appel d'outil)
+    // arrive token par token -> renvoyé au front en direct (AgentEvent "token"). Les
+    // tool_calls, eux, n'arrivent jamais fragmentés (Ollama les livre d'un bloc, en
+    // général dans le dernier chunk) : on les accumule et la logique en aval (exécution
+    // des tools) reste inchangée, comme si on avait reçu une réponse non-streamée.
     const tLlm = Date.now();
     const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: "POST",
@@ -892,15 +899,40 @@ export async function runAssistant(
         model: MODEL,
         messages,
         tools: TOOLS,
-        stream: false,
+        stream: true,
         options: { num_ctx: 8192, temperature: 0.2 },
       }),
     });
     if (!resp.ok) throw new Error(`Ollama ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
-    const data = (await resp.json()) as { message?: ChatMessage };
-    const msg = data.message;
-    if (!msg) throw new Error("réponse LLM vide");
-    agentLog(runId, { event: "llm", step, ms: Date.now() - tLlm, tools_requested: msg.tool_calls?.map((tc: { function?: { name?: string } }) => tc.function?.name) ?? null });
+    if (!resp.body) throw new Error("réponse LLM sans corps (stream)");
+
+    let content = "";
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let toolCalls: any[] | undefined;
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const chunk = JSON.parse(line) as { message?: { content?: string; tool_calls?: any[] } };
+        const delta = chunk.message?.content;
+        if (delta) {
+          content += delta;
+          onEvent?.({ type: "token", step, content: delta });
+        }
+        if (chunk.message?.tool_calls?.length) toolCalls = chunk.message.tool_calls;
+      }
+    }
+    const msg: ChatMessage = { role: "assistant", content, tool_calls: toolCalls };
+    agentLog(runId, { event: "llm", step, ms: Date.now() - tLlm, tools_requested: toolCalls?.map((tc: { function?: { name?: string } }) => tc.function?.name) ?? null });
 
     if (msg.tool_calls?.length) {
       // Action d'écriture demandée ? On INTERCEPTE la 1ère : aucune exécution, on
@@ -937,13 +969,13 @@ export async function runAssistant(
       }
       continue;
     }
-    const answer = msg.content?.trim() || "(je n'ai pas su formuler de réponse — peux-tu reformuler ?)";
+    const answer = msg.content?.trim() || "(je n'ai pas su formuler de réponse — pouvez-vous reformuler ?)";
     const total_ms = Date.now() - t0;
     agentLog(runId, { event: "done", steps: step + 1, ms: total_ms, outcome: "answer", answer_chars: answer.length });
     onEvent?.({ type: "answer", answer, steps: step + 1, total_ms });
     return { answer, steps: step };
   }
-  const answer = "(j'ai atteint la limite d'étapes ; reformule peut-être ta question)";
+  const answer = "(j'ai atteint la limite d'étapes ; reformulez peut-être la question)";
   const total_ms = Date.now() - t0;
   agentLog(runId, { event: "done", steps: MAX_STEPS, ms: total_ms, outcome: "max_steps" });
   onEvent?.({ type: "answer", answer, steps: MAX_STEPS, total_ms });

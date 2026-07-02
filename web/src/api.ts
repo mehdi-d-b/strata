@@ -73,17 +73,6 @@ export const fetchHistoryRange = (tag: string, fromIso: string, toIso: string) =
     )}&to=${encodeURIComponent(toIso)}`,
   );
 
-/**
- * Tendance lissée d'un tag (moyenne par bucket court "1m" ou long "5m") — ce que le
- * mode self-baseline de alarm_rules compare. Même forme que fetchHistoryRange.
- */
-export const fetchTagStats = (tag: string, window: "1m" | "5m", fromIso: string, toIso: string) =>
-  api<{ ts: string; value: number }[]>(
-    `/api/tag-stats?tag=${encodeURIComponent(tag)}&window=${window}&from=${encodeURIComponent(
-      fromIso,
-    )}&to=${encodeURIComponent(toIso)}`,
-  );
-
 /** Libellé d'affichage d'un tag : label si présent, sinon son nom. */
 export function tagLabel(t: Tag): string {
   return t.label?.trim() ? t.label : t.name;
@@ -292,11 +281,15 @@ export const setRetention = (days: number) =>
 export const setCompression = (days: number) =>
   api("/api/storage/compression", { method: "POST", body: JSON.stringify({ days }) });
 
+export type ServiceStatus = { name: string; label: string; reachable: boolean; ms: number };
+
 export type SystemInfo = {
   counts: { tags: number; devices: number; users: number; mesures: string };
   timescaledb_version: string;
   node_version: string;
   connectors: { name: string; state: string }[];
+  /** Services vus depuis la gateway — "injoignable" = profil non démarré OU en panne. */
+  services: ServiceStatus[];
 };
 
 export const fetchSystem = () => api<SystemInfo>("/api/system");
@@ -394,6 +387,16 @@ export const fetchAlarms = () => api<Alarm[]>("/api/alarms");
 export const ackAlarm = (id: string) =>
   api<Alarm>(`/api/alarms/${encodeURIComponent(id)}/ack`, { method: "POST" });
 
+/**
+ * Historique daté (toutes alarmes levées dans la fenêtre, actives ou closes).
+ * `tag` optionnel : indicateurs d'alarme en contexte (Explorer/Dashboards).
+ */
+export const fetchAlarmHistory = (fromIso: string, toIso: string, opts?: { tag?: string; limit?: number }) => {
+  const params = new URLSearchParams({ from: fromIso, to: toIso, limit: String(opts?.limit ?? 500) });
+  if (opts?.tag) params.set("tag", opts.tag);
+  return api<Alarm[]>(`/api/alarms/history?${params.toString()}`);
+};
+
 // ─── OEE (Disponibilité × Performance × Qualité) — pré-calculé en base ─────
 
 export type OeeRow = {
@@ -405,7 +408,10 @@ export type OeeRow = {
   ok: number | null;
   produced: number | null;
   run_minutes: number | null;
+  /** Durée brute (calendaire) du shift — sert aussi à l'écoulé/projection. */
   planned_minutes: number | null;
+  /** Minutes retirées du PPT pour la Dispo (arrêts étiquetés `planned`, ex. nettoyage/pause). */
+  planned_downtime_minutes: number | null;
   ideal_rate: number;
   /** Facteurs 0..1, ou null si indéfini (division par 0 / non configuré). */
   availability: number | null;
@@ -459,6 +465,7 @@ export type StopReason = {
   code: string;
   label: string;
   kind: DowntimeKind;
+  planned: boolean;
   color: string;
 };
 export const fetchStopReasons = () => api<StopReason[]>("/api/stop-reasons");
@@ -503,6 +510,37 @@ export const saveOeeLine = (l: OeeLine) =>
 export const deleteOeeLine = (line: string) =>
   api(`/api/oee-lines/${encodeURIComponent(line)}`, { method: "DELETE" });
 
+/**
+ * Arrêt planifié DÉCLARÉ À L'AVANCE (maintenance, fermeture/congés...) — distinct de
+ * l'étiquetage a posteriori (OeeStop/labelOeeStop) : corrige la Dispo dès maintenant,
+ * même pour un arrêt encore en cours ou une ligne sans données (fermeture longue).
+ */
+export type PlannedStop = {
+  id: string;
+  /** null = toute l'usine (ex: fermeture/congés). */
+  line: string | null;
+  line_label: string | null;
+  reason_code: string;
+  reason_label: string;
+  start_ts: string;
+  end_ts: string;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
+export const fetchPlannedStops = (days = 60) =>
+  api<PlannedStop[]>(`/api/planned-stops?days=${days}`);
+export const savePlannedStop = (body: {
+  line?: string | null;
+  reason_code: string;
+  start_ts: string;
+  end_ts: string;
+  note?: string;
+}) => api<{ id: string; ok: boolean }>("/api/planned-stops", { method: "POST", body: JSON.stringify(body) });
+export const deletePlannedStop = (id: string) =>
+  api(`/api/planned-stops/${encodeURIComponent(id)}`, { method: "DELETE" });
+
 // ─── Assistant (copilote LLM local, lecture seule via la gateway) ──────────
 
 export type ChatMessage = { role: "user" | "assistant"; content: string };
@@ -510,6 +548,7 @@ export type ChatMessage = { role: "user" | "assistant"; content: string };
 export type AgentEvent =
   | { type: "tool_call"; step: number; name: string }
   | { type: "tool_result"; step: number; name: string; ms: number; result_bytes: number }
+  | { type: "token"; step: number; content: string }
   | { type: "answer"; answer: string; steps: number; total_ms: number }
   | { type: "error"; message: string };
 

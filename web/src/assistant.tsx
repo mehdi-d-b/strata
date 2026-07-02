@@ -35,6 +35,8 @@ type AssistantState = {
   messages: Msg[];
   busy: boolean;
   liveTools: ToolCall[];
+  /** Texte de la réponse finale en cours d'arrivée (v4 streaming), token par token. */
+  streamingText: string;
   send: (text: string) => void;
   clear: () => void;
 };
@@ -50,6 +52,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<Msg[]>(load);
   const [busy, setBusy] = useState(false);
   const [liveTools, setLiveTools] = useState<ToolCall[]>([]);
+  const [streamingText, setStreamingText] = useState("");
 
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
@@ -69,6 +72,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     setMessages(base);
     setBusy(true);
     setLiveTools([]);
+    setStreamingText("");
 
     const history = base
       .filter((m) => !m.error)
@@ -81,11 +85,16 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
         const tc: ToolCall = { name: e.name };
         traceRef.push(tc);
         setLiveTools([...traceRef]);
+        // Un texte streamé avant cet appel d'outil n'était que du "chemin de pensée"
+        // transitoire (rare) — pas la réponse finale : on ne le garde pas affiché.
+        setStreamingText("");
       } else if (e.type === "tool_result") {
         for (let i = traceRef.length - 1; i >= 0; i--) {
           if (traceRef[i].name === e.name && traceRef[i].ms === undefined) { traceRef[i].ms = e.ms; break; }
         }
         setLiveTools([...traceRef]);
+      } else if (e.type === "token") {
+        setStreamingText((t) => t + e.content);
       } else if (e.type === "answer") {
         setMessages((m) => [
           ...m,
@@ -93,22 +102,25 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
         ]);
         setBusy(false);
         setLiveTools([]);
+        setStreamingText("");
       } else if (e.type === "error") {
         setMessages((m) => [...m, { role: "assistant", error: true, content: e.message }]);
         setBusy(false);
         setLiveTools([]);
+        setStreamingText("");
       }
     }).catch(() => {
       setMessages((m) => [...m, { role: "assistant", error: true, content: "Erreur de l'assistant." }]);
       setBusy(false);
       setLiveTools([]);
+      setStreamingText("");
     });
   }, []);
 
   const clear = useCallback(() => setMessages([]), []);
 
   return (
-    <AssistantContext.Provider value={{ messages, busy, liveTools, send, clear }}>
+    <AssistantContext.Provider value={{ messages, busy, liveTools, streamingText, send, clear }}>
       {children}
     </AssistantContext.Provider>
   );

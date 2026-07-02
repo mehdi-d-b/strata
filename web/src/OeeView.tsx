@@ -5,15 +5,18 @@ import {
   ApiError,
   deleteOeeLine,
   deleteOeeTarget,
+  deletePlannedStop,
   fetchDowntime,
   fetchOee,
   fetchOeeLines,
   fetchOeeStops,
   fetchOeeTargets,
+  fetchPlannedStops,
   fetchStopReasons,
   labelOeeStop,
   saveOeeLine,
   saveOeeTarget,
+  savePlannedStop,
   userIsAdmin,
   type DowntimeKind,
   type DowntimeRow,
@@ -21,6 +24,7 @@ import {
   type OeeRow,
   type OeeStop,
   type OeeTarget,
+  type PlannedStop,
   type StopReason,
 } from "./api";
 import { useAuth } from "./auth";
@@ -867,7 +871,170 @@ function OeeConfig() {
           </Button>
         </div>
       </Section>
+
+      <PlannedStops lines={lines} />
     </>
+  );
+}
+
+// ─── Arrêts planifiés (calendrier, déclarés à l'avance) ──────────────────
+// Distinct de « Arrêts à classer » ci-dessous (a posteriori) : corrige la Dispo dès
+// maintenant, même pour un arrêt en cours ou une ligne sans données (fermeture longue).
+
+/** ISO -> valeur compatible <input type="datetime-local"> (heure locale du navigateur). */
+function toLocalInput(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function PlannedStops({ lines }: { lines: OeeLine[] }) {
+  const [stops, setStops] = useState<PlannedStop[]>([]);
+  const [reasons, setReasons] = useState<StopReason[]>([]);
+  const now = new Date();
+  const inOneHour = new Date(now.getTime() + 60 * 60_000);
+  const [nu, setNu] = useState({
+    line: "",
+    reason_code: "",
+    start_ts: toLocalInput(now.toISOString()),
+    end_ts: toLocalInput(inOneHour.toISOString()),
+    note: "",
+  });
+
+  const load = () => fetchPlannedStops().then(setStops).catch(() => setStops([]));
+  useEffect(() => {
+    load();
+    fetchStopReasons().then(setReasons).catch(() => setReasons([]));
+  }, []);
+
+  // Seuls les motifs PLANIFIÉS ont un sens ici (nettoyage/pause/maintenance/fermeture…).
+  const plannedReasons = reasons.filter((r) => r.planned);
+
+  const add = async () => {
+    if (!nu.reason_code || !nu.start_ts || !nu.end_ts) return;
+    try {
+      await savePlannedStop({
+        line: nu.line || null,
+        reason_code: nu.reason_code,
+        start_ts: new Date(nu.start_ts).toISOString(),
+        end_ts: new Date(nu.end_ts).toISOString(),
+        note: nu.note || undefined,
+      });
+      toast.success("Arrêt planifié ajouté.");
+      setNu({ ...nu, note: "" });
+      load();
+    } catch {
+      toast.error("Ajout impossible (vérifie que la fin est après le début).");
+    }
+  };
+
+  const remove = async (id: string) => {
+    await deletePlannedStop(id);
+    load();
+  };
+
+  return (
+    <Section
+      title="Arrêts planifiés (calendrier)"
+      hint={
+        <>
+          Déclare à l'avance une maintenance ou une fermeture : la Disponibilité en tient
+          compte immédiatement (même arrêt en cours, même ligne sans données) — contrairement
+          au classement d'un arrêt déjà détecté ci-dessous. Laisse « toute l'usine » vide
+          pour une fermeture générale.
+        </>
+      }
+    >
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Ligne</TableHead>
+            <TableHead>Motif</TableHead>
+            <TableHead>Début</TableHead>
+            <TableHead>Fin</TableHead>
+            <TableHead>Note</TableHead>
+            <TableHead />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {stops.map((s) => (
+            <TableRow key={s.id}>
+              <TableCell>{s.line ? (s.line_label ?? s.line) : "Toute l'usine"}</TableCell>
+              <TableCell>{s.reason_label}</TableCell>
+              <TableCell className="tabular-nums whitespace-nowrap">
+                {fmtDateTime(s.start_ts)}
+              </TableCell>
+              <TableCell className="tabular-nums whitespace-nowrap">
+                {fmtDateTime(s.end_ts)}
+              </TableCell>
+              <TableCell className="text-muted-foreground">{s.note ?? "—"}</TableCell>
+              <TableCell>
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  className="text-destructive hover:text-destructive"
+                  title="Supprimer"
+                  onClick={() => remove(s.id)}
+                >
+                  <Trash2 />
+                </Button>
+              </TableCell>
+            </TableRow>
+          ))}
+          {stops.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={6} className="text-muted-foreground">
+                Aucun arrêt planifié à venir ou récent.
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <select value={nu.line} onChange={(e) => setNu({ ...nu, line: e.target.value })}>
+          <option value="">Toute l'usine</option>
+          {lines.map((l) => (
+            <option key={l.line} value={l.line}>
+              {l.label ?? l.line}
+            </option>
+          ))}
+        </select>
+        <select
+          value={nu.reason_code}
+          onChange={(e) => setNu({ ...nu, reason_code: e.target.value })}
+        >
+          <option value="">— motif —</option>
+          {plannedReasons.map((r) => (
+            <option key={r.code} value={r.code}>
+              {r.label}
+            </option>
+          ))}
+        </select>
+        <Input
+          type="datetime-local"
+          className="w-52"
+          value={nu.start_ts}
+          onChange={(e) => setNu({ ...nu, start_ts: e.target.value })}
+        />
+        <Input
+          type="datetime-local"
+          className="w-52"
+          value={nu.end_ts}
+          onChange={(e) => setNu({ ...nu, end_ts: e.target.value })}
+        />
+        <Input
+          className="w-48"
+          placeholder="note (optionnel)"
+          value={nu.note}
+          onChange={(e) => setNu({ ...nu, note: e.target.value })}
+        />
+        <Button size="sm" variant="outline" onClick={add}>
+          <Plus />
+          Ajouter
+        </Button>
+      </div>
+    </Section>
   );
 }
 

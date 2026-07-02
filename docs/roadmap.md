@@ -132,9 +132,21 @@ Architecture **cerveau / faces** conçue pour accueillir les vraies faces en P6 
     - [x] **Pareto basé sur les arrêts étiquetés** (`GET /api/oee/downtime/events`) : agrège les
           arrêts détectés par **motif effectif** (label opérateur sinon dérivé) → les reclassements
           remontent dans le Pareto. Validé en live.
-    - [ ] *v2 restant* : codes motif PLC (auto), durées exactes (sub-bucket), distinction
-          planifié/non planifié **dans le calcul OEE** (sortir les arrêts planifiés du PPT).
-  - [ ] Cadence **par produit** + **calendrier d'arrêts planifiés** (sortir les pauses du PPT).
+    - [x] **Planifié/non-planifié dans le calcul OEE** : la Dispo divise par le PPT NET
+          (durée du shift − minutes des arrêts étiquetés `planned`, ex. nettoyage/pause) au lieu
+          de la durée brute — nouveau champ `planned_downtime_minutes` sur `/api/oee`. Ne
+          fonctionne que sur les arrêts déjà étiquetés par l'opérateur (pas de calendrier de
+          pauses déclaré à l'avance, cf. ligne suivante). Validé en live (`docs/oee-design.md`).
+    - [ ] *v2 restant* : codes motif PLC (auto), durées exactes (sub-bucket, hors du chemin déjà
+          exact des arrêts étiquetés).
+  - [x] **Calendrier d'arrêts planifiés** (déclaré à l'avance, sans dépendre d'un étiquetage a
+        posteriori) : table `planned_stop` (par ligne ou toute l'usine), branché dans le calcul
+        de la Dispo avec anti-double-comptage vs les arrêts déjà étiquetés. UI : OEE →
+        Configuration. Validé en live (`docs/oee-design.md`).
+  - [ ] Cadence **par produit** — *bloqué pour l'instant (2026-07-02)* : dans le simulateur,
+        **une ligne = une recette, en permanence** (`brain.py`, pas de changement de série sur
+        une ligne) — donc rien à valider en live tant que cette physique n'existe pas. Repris
+        si un changement de série est ajouté au simulateur, ou si un vrai besoin client apparaît.
   - [ ] **OEE *live*** (RisingWave) : fenêtre glissante sub-seconde pour la **réactivité atelier**
         — andon (écran qui égraine l'OEE en direct), **alerte OEE** sous seuil (réutilise le modèle
         d'alarmes `source='derived'`), capter les micro-arrêts que les buckets 15 min lissent.
@@ -148,6 +160,30 @@ Architecture **cerveau / faces** conçue pour accueillir les vraies faces en P6 
       dépendance lourde ni GPU, par le mode bande de `alarm_rules` (écart à la consigne, cf.
       `docs/infra-architecture.md` §3) ou par un calcul déterministe depuis la recette (ETA vers
       la consigne). La branche `feat/forecaster` a été supprimée — jamais mergée dans `main`.
+- [x] **« Santé équipement » — bande + self-baseline générique (essayé, abandonné, 2026-07)**.
+      Page dédiée (`/health`) exposant les modes bande (`ref_tag`/`tolerance`) et self-baseline
+      (`baseline_sigma`, tendance 1 min vs 5 min) de `alarm_rules` comme « équipements surveillés »,
+      avec démos dédiées (groupe froid/dégivrage pour la bande, usure/vibration embouteilleuse pour
+      le self-baseline). Retirée après évaluation en conditions réelles : le mode bande, pour être
+      lisible, exige d'éviter le régime transitoire (cf. démo fermenteur vs `temp_cible`, mauvais
+      choix initial à cause du cycle de batch accéléré) — une fois ce cherry-picking fait, ça reste
+      proche d'une alarme classique déguisée. Le mode self-baseline détecte une dérive
+      statistiquement réelle (vibration embouteilleuse) mais sans rattachement à un mode de
+      défaillance identifiable : la courbe (dents de scie court/long terme) n'est pas actionnable
+      pour un mainteneur — "la moyenne a bougé" ne dit pas quoi faire. Aucune des deux formes
+      génériques ne justifie une page produit auto-service.
+      **Gardé** (briques bas niveau, réutilisables sans coût à les laisser en place) : modes
+      bande/self-baseline de `alarm_rules` (gateway `alarms.ts`), agrégats continus
+      `tag_stats_1m`/`tag_stats_5m`, route `GET /api/tag-stats`, physique de démo simulateur (usure
+      embouteilleuse, groupe froid + cycle de dégivrage). Ces règles restent visibles/gérables
+      depuis Alarmes → Règles de seuil, juste sans page de visualisation dédiée.
+      **Retiré** : `web/src/HealthView.tsx`, route `/health`, entrée nav, `fetchTagStats` côté front
+      (orpheline sans la page).
+      **Piste envisagée** : pas une feature générique de plus, mais un **bloc de maintenance
+      prédictive taillé par installation** — mesure et paramètres spécifiques à un mode de
+      défaillance connu d'un équipement donné, écrits par un dev à l'installation chez un client
+      (potentiellement un petit modèle ML dédié plutôt qu'une statistique générique sur un tag
+      arbitraire), pas un self-service. Non dimensionné à date (pas de client/besoin réel identifié).
 - [ ] **Assistant IA (LLM local + RAG + MCP)** — *pluggable sans refonte* grâce aux contrats
       stables (topic `tags.raw`, API REST, RBAC). Principe clé : l'IA est **un utilisateur de
       plus** → un serveur MCP « Strata » expose des tools qui appellent l'API gateway existante
@@ -177,9 +213,24 @@ Mené dans un chat dédié au front (`web/`, parfois `gateway/`). Mergé dans `m
       alarme) = règle `== 1` via **fiche-tag** + **import CSV/Excel** (SheetJS). ⚠️ **une seule
       source de vérité `alarm_rules`, pas de flag `is_alarm`**.
 - [x] **Finitions** : palette de commandes **⌘K**, toggle de **densité**, préférences locales.
-- [ ] *Reste front (Phase C alarmes, plus tard)* : **historique d'alarmes daté**
-      (`/api/alarms/history`), **push WS instantané** (dépend de la sécurisation du `/ws`),
-      indicateurs d'alarme **en contexte** (Explorer/Dashboards), son optionnel.
+- [x] **Phase C alarmes (fait, 2026-07-02)** :
+      - **Historique d'alarmes daté** : `/api/alarms/history` existait déjà côté gateway
+        (non branché) — nouvel onglet « Historique » dans Alarmes (période 24h/7j/30j,
+        filtre sévérité, durée par alarme).
+      - **Push WS instantané** : `/ws` porte maintenant deux types de message
+        (`type: "measure"` inchangé, nouveau `type: "alarm"`), même filtrage RBAC par tag
+        que les mesures. `AlarmEngine` accepte un callback `onEvent` appelé à chaque
+        raise/clear (`gateway/src/alarms.ts`). Le polling REST ~7s reste le filet de
+        rattrapage (1er chargement, reconnexion) — pas de reconnexion auto sur le WS,
+        cohérent avec `useRealtimeBuffers.ts`. Validé en live : bascule d'un seuil de
+        règle observée en direct sur le socket, forme du message correcte.
+      - **Indicateurs d'alarme en contexte** : `MultiChart` accepte `alarmBands` (bandes
+        verticales teintées par sévérité, peintes derrière les séries via le hook uPlot
+        `drawClear`) — branché dans Dashboards (tous modes) et Explorer (**mode historique
+        uniquement** ; le direct reste sans bandes, le badge/toast suffit pour le temps réel).
+      - **Son optionnel** : bip généré (Web Audio, pas de fichier), préférence
+        `alarmSound` — **désactivée par défaut**, dépend de `alarmToasts` (Paramètres →
+        Préférences d'affichage).
 
 ## Dette technique & durcissement « prod »
 Choix assumés de la phase démo : rien de bloquant en local, mais à traiter avant un vrai
@@ -240,9 +291,14 @@ rétention sans toucher au SQL »).
       compose et **pull** tout. Demande : registry + CI de build/push, compose de prod, `.env`
       généré (déjà fait dans le launcher). Variante usine **air-gapped** : images en tarballs
       (`docker save`/`load`).
-- [ ] **Enrichir `/api/system`** : état des services vus par la gateway (Redpanda/Timescale/
-      RisingWave joignables ?, profils actifs). Limite assumée : la gateway ne voit que de
-      l'intérieur ; le monitoring infra « vrai » reste externe (Console, Grafana).
+- [x] **Enrichir `/api/system`** : nouveau champ `services[]` — TimescaleDB (`SELECT 1`),
+      Redpanda (admin Kafka), Kafka Connect, Ollama (assistant IA), RisingWave (TCP direct sur
+      4566, même sonde que son propre healthcheck Docker), chacun avec `reachable`+latence,
+      timeout 1,5 s. Pour les profils optionnels, « injoignable » = non démarré OU en panne,
+      indifférencié (limite assumée : la gateway ne voit que de l'intérieur ; le monitoring
+      infra « vrai » reste externe, Console/Grafana). UI : section « Services » dans Paramètres
+      → Système. Validé en live contre l'état réel des conteneurs (Kafka Connect/RisingWave
+      arrêtés, Timescale/Redpanda/Ollama actifs — correspond exactement).
 
 ### Assistant IA — 100 % local (cf. docs/llm-integration.md)
 > 🧭 **Fil conducteur terrain → harness → modèle : [docs/assistant-roadmap.md](assistant-roadmap.md)**
@@ -281,7 +337,17 @@ rétention sans toucher au SQL »).
       du modèle**, et injectés dans l'historique avant la boucle ReAct existante (même mécanique
       de tool-call, zéro changement front). Le modèle n'a plus qu'à corréler/conclure sur un
       dossier déjà complet ; il garde la liberté d'appeler un tool de plus en filet de sécurité.
-- [ ] **v4 — streaming token** (UX) + valider en live avec `qwen2.5:14b` sur le Mac M4.
+- [x] **v4 — streaming token** (UX). `stream:true` sur l'appel Ollama `/api/chat` : les
+      `tool_calls` n'arrivent jamais fragmentés (Ollama les livre d'un bloc), seul le texte
+      d'une réponse finale est lu au fil de l'eau (NDJSON) et relayé par un nouvel événement
+      SSE `{type:"token", step, content}` — la logique d'exécution des tools est inchangée.
+      Front (`assistant.tsx`/`AssistantView.tsx`) : bulle qui grandit token par token avec
+      curseur clignotant (au lieu d'attendre la réponse en bloc). Validé en live avec
+      `qwen2.5:14b` (Metal, Mac M4) : `GET /api/oee` → réponse correcte et fluide (~59 s tout
+      compris, tool call + génération). ⚠️ Un tool au résultat volumineux (`list_alarms`,
+      ~14 Ko) a fait exploser le temps de traitement du prompt (~190 s pour 2 caractères
+      générés) — pré-existant (indépendant du streaming, reproduit en direct contre Ollama),
+      pas corrigé ici : à traiter plus tard en bornant/résumant les résultats de tools volumineux.
 
 ### Documentation utilisateur / aide en ligne (in-app)
 But : qu'un **utilisateur non-tech** découvre **toutes** les features et **comment les utiliser**.
