@@ -1,20 +1,28 @@
 import { useEffect, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import {
+  ApiError,
   ROLES,
+  canWrite,
   deleteShift,
+  fetchHistory,
+  fetchOeeLines,
   fetchProduction,
   fetchShifts,
   fetchTagRoles,
   fetchTags,
   saveShift,
   saveTagRole,
+  sendCommand,
+  type OeeLine,
   type ProductionRow,
   type Role,
   type ShiftRow,
   type Tag,
   type TagRoleRow,
 } from "./api";
+import { useAuth } from "./auth";
 import { PageHeader } from "@/components/PageHeader";
 import { Section } from "@/components/Section";
 import { Button } from "@/components/ui/button";
@@ -35,6 +43,103 @@ function scrapRate(r: ProductionRow): string {
   const total = ok + scrap;
   if (!total) return "—";
   return `${((scrap / total) * 100).toFixed(1)} %`;
+}
+
+// ─── Pilotage : démarrer/arrêter une ligne ─────────────────────────────────
+// Réutilise l'écriture de consigne existante (/api/command -> tags.cmd, même
+// RBAC que CommandBox) sur le `running_tag` déjà configuré côté OEE (convention
+// 1 = en marche) — pas de nouvelle plomberie, juste une UI dédiée au lieu de
+// taper un 0/1 dans un champ numérique.
+function PilotageSection() {
+  const { user } = useAuth();
+  const [lines, setLines] = useState<OeeLine[]>([]);
+  const [state, setState] = useState<Record<string, number | null>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchOeeLines()
+      .then((ls) => setLines(ls.filter((l) => l.enabled && l.running_tag)))
+      .catch(() => setLines([]));
+  }, []);
+
+  useEffect(() => {
+    if (lines.length === 0) return;
+    let cancelled = false;
+    const poll = () => {
+      Promise.all(
+        lines.map((l) =>
+          fetchHistory(l.running_tag!, 1)
+            .then((rows) => [l.line, rows.at(-1)?.value ?? null] as const)
+            .catch(() => [l.line, null] as const),
+        ),
+      ).then((entries) => {
+        if (!cancelled) setState(Object.fromEntries(entries));
+      });
+    };
+    poll();
+    const iv = setInterval(poll, 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+    };
+  }, [lines]);
+
+  const toggle = async (l: OeeLine) => {
+    const running = (state[l.line] ?? 0) >= 1;
+    setBusy(l.line);
+    try {
+      await sendCommand(l.running_tag!, running ? 0 : 1);
+      toast.success(
+        running ? `Ligne ${l.label ?? l.line} arrêtée.` : `Ligne ${l.label ?? l.line} démarrée.`,
+      );
+      setState((s) => ({ ...s, [l.line]: running ? 0 : 1 }));
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError && err.status === 403 ? "Non autorisé." : "Échec de l'envoi.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (lines.length === 0) return null;
+
+  return (
+    <Section
+      title="Pilotage"
+      hint="Démarre/arrête une ligne (écrit sur son tag de marche). Nécessite le droit d'écriture sur la ligne."
+    >
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {lines.map((l) => {
+          const running = (state[l.line] ?? 0) >= 1;
+          const writable = canWrite(user, l.line);
+          return (
+            <div
+              key={l.line}
+              className="flex items-center justify-between rounded-lg border border-border p-3"
+            >
+              <div>
+                <div className="text-sm font-medium">{l.label ?? l.line}</div>
+                <span className={`status ${running ? "live" : "off"}`}>
+                  {running ? "En marche" : "Arrêtée"}
+                </span>
+              </div>
+              {writable && (
+                <Button
+                  size="sm"
+                  variant={running ? "outline" : "default"}
+                  disabled={busy === l.line}
+                  onClick={() => toggle(l)}
+                >
+                  {busy === l.line ? "…" : running ? "Arrêter" : "Démarrer"}
+                </Button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Section>
+  );
 }
 
 export function ProductionView() {
@@ -80,6 +185,8 @@ export function ProductionView() {
         title="Production"
         description="Sorties par shift, rôles des compteurs et planning."
       />
+
+      <PilotageSection />
 
       {/* ─── Tableau de production ─────────────────────────────── */}
       <Section title="Production par shift">

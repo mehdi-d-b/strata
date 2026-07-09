@@ -56,7 +56,17 @@ couches. Chaque phase est démontrable seule.
       assumé au « OPC-UA sans JVM » initial, au profit d'un réemploi total. *Câblé ; non validé
       end-to-end (pas de serveur OPC-UA de test). Alternative no-JVM `gopcua` = juste une autre
       source vers `tags.raw`, ajoutable plus tard.*
-- [ ] Sink PLC4X : écriture de consignes dans les tags (le `Plc4xSinkConnector` est déjà dispo)
+- [ ] Sink PLC4X : écriture de consignes dans les tags (le `Plc4xSinkConnector` est déjà dispo).
+      *Précision (2026-07-02)* : ne concerne QUE un vrai déploiement avec automate physique —
+      l'écriture de consigne EN DÉMO fonctionne déjà intégralement (`/api/command` → topic
+      Kafka `tags.cmd` → `command_face.py` du simulateur, RBAC write par user × ligne déjà en
+      place via Admin → Rôles & droits). Pas de besoin tant qu'aucun vrai automate n'est à piloter.
+- [x] **Pilotage (démarrer/arrêter une ligne) — fait (2026-07-02)**. Section « Pilotage » en
+      haut de la page Production : un bouton par ligne (celles configurées dans `oee_line`,
+      via leur `running_tag`), visible seulement si l'utilisateur a le droit `write` sur la
+      ligne (`canWrite`, même check que `CommandBox`). Réutilise entièrement l'écriture
+      existante — aucune nouvelle route ni nouveau modèle de droits. Validé en live : écriture
+      0 puis 1 sur `brasserie.jalapeno.embouteilleuse.state`, effet visible en ~2 s.
 
 ## Phase 5 — Simulateur d'usine (cerveau riche, faces simples) ⬅️ *fait* 🍺
 **But : une usine virtuelle vivante et marrante pour les démos.**
@@ -348,6 +358,26 @@ rétention sans toucher au SQL »).
       ~14 Ko) a fait exploser le temps de traitement du prompt (~190 s pour 2 caractères
       générés) — pré-existant (indépendant du streaming, reproduit en direct contre Ollama),
       pas corrigé ici : à traiter plus tard en bornant/résumant les résultats de tools volumineux.
+- [x] **RAG — ingestion PDF (2026-07-09)**. `search_knowledge`/`knowledge` (pgvector)
+      n'acceptait jusqu'ici que des textes écrits à la main (`seed-knowledge.ts`, ~20 entrées
+      déjà taille chunk). Ajout de `seed-knowledge-pdf.ts` : lit les PDF de
+      `gateway/knowledge-pdfs/` (committés, contenu inventé/non confidentiel), extrait le texte
+      (**`pdfjs-dist`**, pas `pdf-parse` — sa version interne de pdf.js échoue sur des PDF
+      valides, vérifié en direct contre un PDF généré par `pdfkit` et confirmé lisible par
+      `pypdf`), découpe en chunks (**`RecursiveCharacterTextSplitter`** de
+      `@langchain/textsplitters`, chunkSize 1000/overlap 150), embedde chaque chunk (même
+      `nomic-embed-text` qu'avant) et upsert dans `knowledge` (catégorie `manuel`, titre =
+      `<fichier> — chunk i/N`, pas de migration de schéma nécessaire). Idempotent
+      (`ON CONFLICT (category, title)`).
+      ⚠️ **`@langchain/community` (qui porte `PDFLoader`) est déprécié** par LangChain
+      lui-même (les mainteneurs recommandent des paquets dédiés ou du code applicatif direct
+      plutôt qu'un gros paquet "community") — écarté au profit de `pdfjs-dist` en direct.
+      Seul `@langchain/textsplitters` est utilisé, pas le reste du framework.
+      Chunking sémantique et *contextual retrieval* (Anthropic) évalués et écartés pour l'instant :
+      corpus trop petit/trop propre (écrit par nous) pour qu'un problème de perte de contexte
+      aux frontières de chunk se manifeste — à reconsidérer seulement si les métriques de
+      récupération le justifient un jour. Validé en live : question sur le changement de fût
+      CO2 → `search_knowledge` retrouve le bon chunk, réponse correcte et sourcée.
 
 ### Documentation utilisateur / aide en ligne (in-app)
 But : qu'un **utilisateur non-tech** découvre **toutes** les features et **comment les utiliser**.
