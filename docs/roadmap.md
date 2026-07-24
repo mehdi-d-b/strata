@@ -379,6 +379,303 @@ rétention sans toucher au SQL »).
       récupération le justifient un jour. Validé en live : question sur le changement de fût
       CO2 → `search_knowledge` retrouve le bon chunk, réponse correcte et sourcée.
 
+### Migration vers un microservice Python (FastAPI + LangGraph) — `ai-service/`
+> Décision : garder la gateway TS **inchangée** (Kafka, WS, RBAC, alarmes, OEE) ; tout le
+> chat/RAG/agent bascule vers un microservice Python dédié, appelé en HTTP. Frontière de sécurité
+> préservée : `ai-service` n'a **aucun accès direct** à Postgres/Kafka — seule porte d'entrée =
+> la gateway, comme n'importe quel client HTTP. Justifié par une reprio explicite (employabilité/
+> portfolio > fondation évolutive > confort produit immédiat) plutôt que par un besoin produit —
+> assumé comme tel.
+- [x] **Étape 1 — squelette + preuve de frontière (2026-07-17)**. `ai-service/` (`uv`, FastAPI,
+      LangGraph `create_react_agent`, `langchain-ollama`), un seul tool (`get_oee`, appelle
+      `GET /api/oee` sur la gateway). Dockerfile + service `ai-service` dans `docker-compose.yml`
+      (profil `ai`, comme `ollama`) ; Ollama tourne nativement sur ce Mac (GPU Metal), d'où
+      `OLLAMA_URL=host.docker.internal`, même schéma que `gateway`. Modèle de test découplé de la
+      prod via `AI_SERVICE_MODEL` (pas `ASSISTANT_MODEL`, sinon `.env` écraserait silencieusement) :
+      `qwen2.5:7b` retenu après comparaison — `mistral:7b` a un vrai support tool-calling (Ollama
+      l'annonce, confirmé) mais s'est montré trop sensible à la formulation exacte de la question
+      via LangGraph/`bind_tools` (« résume » échoue, « donne-moi » marche) ; `qwen2.5:7b`, même
+      famille que le 14b de prod, est resté fiable sur les mêmes reformulations.
+      ⚠️ **Flakiness Ollama locale découverte en cours de route** : fuite de tool-call en texte
+      brut (`<tool_call>` corrompu en tag illisible), reproduite en direct sur l'agent TS existant
+      (`/api/assistant/chat`) sur une instance Ollama fraîchement redémarrée — donc **pas un bug de
+      code**, un problème d'infra locale (charge/thermal du Mac pendant des tests concurrents
+      répétés). Non résolu, pas bloquant : réapparaît occasionnellement selon la formulation même
+      hors charge (ex. « Combien y a-t-il de batches en cours ? » vs « Liste les batches en cours »
+      qui marche) — sensibilité connue des petits modèles locaux au tool-calling, à garder en tête.
+- [x] **Étape 2 — portage complet du graphe (2026-07-17)**. Tous les tools de
+      `assistant.ts::TOOLS` portés en tools LangChain (`ai-service/tools.py`), chacun appelant la
+      gateway en HTTP (jamais Postgres/Kafka direct) :
+      - 7 déjà couverts par des routes REST existantes (`get_oee`, `get_production`, `list_alarms`
+        → `/api/alarms`, `get_history`, `get_active_batches`/`get_shift_summary`/`get_oee_breakdown`
+        composés côté Python à partir de `/api/oee` (qui fait déjà `SELECT *` sur `oee_by_shift`,
+        donc `is_current`/`on_track` étaient déjà là) + `/api/batches` + `/api/oee/downtime`).
+      - **6 nouvelles routes REST ajoutées à la gateway** (thin wrappers du SQL déjà présent dans
+        `assistant.ts::execTool`, rien de nouveau inventé) : `GET /api/batches/:ref/context`,
+        `GET /api/schema`, `POST /api/query-readonly` (sandbox SQL en lecture seule — mêmes
+        garde-fous qu'avant : rôle `strata_ro`, transaction READ ONLY, timeout, LIMIT 500 — décision
+        explicitement validée avant implémentation, pas prise seul vu la surface exposée), `POST
+        /api/knowledge/search`, `GET /api/lines/status`, `GET /api/factory-context` (contexte usine
+        dynamique injecté dans le system prompt). Toutes gated `requireAuth`.
+      - `ai-service` s'authentifie contre la gateway via un **compte de service** (login + cookie de
+        session, `gateway.py`) — pas encore l'identité de l'opérateur qui discute (ça viendra avec
+        le rebranchement du frontend, étape 6).
+      - **Routage forcé RCA** (`routing.py` : portage exact de `detectBatchDiagnostic`/
+        `buildKnowledgeQuery`) devenu une **entrée conditionnelle du graphe** (`StateGraph`,
+        pas du code impératif avant la boucle comme en TS) : diagnostic de batch détecté → nœud
+        `forced_batch` (appelle `get_batch_context` puis, si non conforme, `search_knowledge` ciblé)
+        → `agent`, sinon direct → `agent`. Validé en live : « Pourquoi le dernier batch ipa est-il
+        hors spec ? » déclenche bien la séquence forcée, résout « dernier ipa » côté serveur,
+        conclut sur `cip_ok`/`cuves_hors_bande` sans halluciner.
+      - **Tools d'écriture interceptés** (`set_command`, `ack_alarm`) : routées vers un nœud dédié
+        AVANT tout `ToolNode` — jamais exécutées, réponse = proposition à confirmer. Persistance +
+        `/confirm` réels repoussés à l'étape 4 (`interrupt()` + checkpointer Postgres) ; pour
+        l'instant la proposition est éphémère (pas de `PENDING` map côté Python).
+      - **Streaming SSE** (`astream_events` v2) sur `POST /chat` : mêmes types d'événements que
+        `AgentEvent` côté TS (`tool_call`/`tool_result`/`token`/`answer`), pour rester branchable
+        tel quel une fois le front rewiré sur ce service.
+      - Bug trouvé et corrigé en testant : `get_batch_context` recevait le `batch_ref` non
+        URL-encodé (espaces/`?` cassaient le routing Fastify côté gateway) ; descriptions par
+        paramètre (perdues en portant juste la docstring Python) réintroduites via
+        `Annotated[..., Field(description=...)]` — sans elles le modèle passait `line='blonde'`
+        au lieu de `'brasserie.blonde'` (correspondance exacte côté SQL, donc résultat vide) ;
+        `list_alarms` plafonné à 20 lignes (pas 50 comme le TS) après une réponse vide du modèle
+        face à 601 alarmes accumulées pendant les tests de la soirée (dépassement de contexte).
+- [x] **Étape 3 — ingestion RAG en Python (2026-07-17)**. Arbitrage préalable, explicitement
+      tranché : le plan visait `PGVectorStore` (`langchain-postgres`), mais ce client a besoin
+      d'une connexion Postgres directe — en tension avec l'invariant tenu toute la soirée
+      (`ai-service` ne touche jamais la base directement). Décision : **rester 100% gateway-only**,
+      pas de `PGVectorStore`. Nouvelle route `POST /api/knowledge/ingest` (gateway) — upsert pur,
+      l'embedding est calculé côté Python et envoyé déjà prêt (la gateway n'a pas besoin de
+      connaître le modèle d'embedding). `ai-service/ingest.py` (`uv run python ingest.py`,
+      portage de `seed-knowledge-pdf.ts`) : extraction + découpage (`RecursiveCharacterTextSplitter`,
+      `langchain-text-splitters`, mêmes chunk_size=1000/overlap=150), embed via Ollama en direct
+      (pas par la gateway : calcul stateless, pas une donnée métier), upsert via
+      `/api/knowledge/ingest`. PDF dupliqués dans `ai-service/knowledge-pdfs/` (Python est
+      désormais propriétaire du pipeline RAG).
+      ⚠️ **Correction en cours de route, notable** : prévu d'utiliser `PyPDFLoader`
+      (`langchain_community.document_loaders`) — une recherche web juste avant disait cet import
+      toujours recommandé. Mais à l'exécution : `DeprecationWarning` en direct annonçant que
+      `langchain-community` a été **archivé/sunset le 19 juin 2026** (annonce du 22 mai 2026,
+      [issue #674](https://github.com/langchain-ai/langchain-community/issues/674)) — la doc de
+      référence trouvée par recherche web n'était simplement pas encore à jour vu la fraîcheur de
+      l'annonce (~1 mois). Corrigé : extraction via `pypdf` (la lib sous-jacente que `PyPDFLoader`
+      ne faisait qu'envelopper) en direct, `langchain-community` retiré des dépendances. Même
+      schéma de décision que côté JS (`pdfjs-dist` en direct plutôt que `@langchain/community`
+      pour `PDFLoader`) — décidé indépendamment, pour la même raison, à ~5 mois d'écart.
+      Validé en live : ré-ingestion (7 chunks, 2 PDF, mêmes comptes qu'avant), `search_knowledge`
+      retrouve le chunk fraîchement ré-ingéré en 1er (score 0.764) sur une question ciblée, et
+      l'agent complet (`ai-service` /chat) répond correctement et de façon sourcée.
+- [x] **Étape 4 — human-in-the-loop via `interrupt()` (2026-07-17)**. Remplace le `pending_action`
+      fait main de `assistant.ts` par le mécanisme natif LangGraph : `_write_intercept_node`
+      (`graph.py`) appelle `interrupt(payload)`, qui suspend le graphe (au lieu de le terminer)
+      et renvoie le `thread_id` de la session ; `POST /confirm` reprend l'exécution exactement au
+      point de suspension via `Command(resume={"confirmed": bool})`.
+      Arbitrage préalable (même tension qu'à l'étape 3, encore un checkpointer voulait une
+      connexion Postgres directe) : **checkpointer `InMemorySaver`**, pas `AsyncPostgresSaver` —
+      constat que le `PENDING` actuel de `assistant.ts` (`new Map()`) est *déjà* purement en
+      mémoire, pas persisté ; passer en mémoire côté Python n'est donc pas une régression de
+      fiabilité, juste la même caractéristique (perdu si le service redémarre), et ça évite un
+      nouvel accès DB direct.
+      ⚠️ **Scope explicitement limité** : sur confirmation, RIEN n'est réellement exécuté (pas de
+      vrai `POST /api/command`/`ack`). Raison : `ai-service` s'authentifie contre la gateway comme
+      un compte de service admin (cf. étape 2), pas comme l'opérateur qui discute — or
+      `/api/assistant/confirm` (TS) re-vérifie `can(user,"write",tag)` avec l'identité RÉELLE de
+      qui confirme avant d'exécuter. Exécuter maintenant sous le compte admin contournerait cette
+      RBAC par utilisateur — un vrai affaiblissement de sécurité sur une action d'ÉCRITURE, pas
+      juste une fonctionnalité manquante. Décision explicitement validée avant implémentation :
+      mécanique interrupt()/reprise construite et testée maintenant, exécution réelle repoussée à
+      l'étape 6 (identité de l'opérateur transmise depuis le front rewiré, RBAC re-vérifiable pour
+      de vrai). Validé en live : propose → confirme (message de simulation) ; propose → annule
+      (« Action annulée ») ; re-confirmer un thread déjà traité → « rien à confirmer » (idempotent,
+      même comportement one-shot que `consumePending` côté TS).
+- [x] **Étape 5 — LangGraph Studio, PAS LangSmith (2026-07-17)**. LangSmith explicitement écarté :
+      SaaS externe, potentiellement payant — hors de question pour un projet 100% local (même
+      logique que le choix Ollama depuis le début). LangGraph Studio retenu à la place : exécution
+      et données **100% locales** (`langgraph dev`, mode `--in-mem`) — seule l'UI de visualisation
+      est une page web (`studio.langchain.com`) qui parle en direct au serveur local
+      (`localhost:2024`) depuis le navigateur, rien ne transite par les serveurs de LangChain.
+      Nuance vérifiée puis validée explicitement avec l'utilisateur avant implémentation (accepté).
+      Setup : `langgraph-cli[inmem]` en **dépendance dev uniquement**
+      (`[dependency-groups] dev`, PEP 735) — absent de l'image Docker de prod (`Dockerfile` fait
+      `uv sync --locked` sans `--group dev`). `langgraph.json` pointe sur une instance
+      module-level `graph` (`graph.py`) **sans checkpointer** : la plateforme Studio gère sa
+      propre persistance et rejette un `InMemorySaver` fourni à la compilation (erreur rencontrée
+      et corrigée) — `build_graph()` accepte donc un `checkpointer` optionnel, `None` pour Studio,
+      `InMemorySaver()` explicite côté FastAPI (`main.py`, inchangé sinon).
+      Validé en live : `langgraph dev` charge le graphe sans erreur, `POST /threads` +
+      `POST /threads/:id/runs/stream` exécute réellement la boucle (tool call `get_active_batches`
+      → résultat → réponse finale), chaque étape apparaît comme un événement `values` distinct —
+      exactement ce que visualise l'UI Studio nœud par nœud. C'est directement ce que l'utilisateur
+      voulait dès le départ de ce chantier (« je veux voir comment ça se passe mon workflow LLM »).
+      Usage : `cd ai-service && uv run --group dev langgraph dev`, ouvrir l'URL Studio affichée
+      dans le terminal.
+- [~] **Étape 6 — front CopilotKit (2026-07-17 → 2026-07-20, 3/3 parties codées, PAS reconfirmé
+      en direct après la migration v2)**. Découverte en amont, pas
+      anticipée par le plan initial : CopilotKit **exige** un runtime Node/JS entre le front React
+      et l'agent Python (protocole AG-UI) — ce n'est pas juste remplacer des composants front.
+      Architecture retenue (validée avec l'utilisateur avant implémentation) : `web/` → runtime
+      CopilotKit monté **dans la gateway existante** (pas un 4ᵉ service séparé) → `ai-service`.
+      - **Partie 1 (Python, faite)** : package `copilotkit` + `ag-ui-langgraph[fastapi]`
+        (versions exactes trouvées via le repo de référence officiel
+        [`CopilotKit/with-langgraph-fastapi`](https://github.com/CopilotKit/CopilotKit/tree/main/examples/integrations/langgraph-fastapi),
+        récupéré en brut via `curl` après que `WebFetch` résumait/paraphrasait au lieu de donner le
+        code exact). `LangGraphAGUIAgent` enveloppe le `graph` déjà exposé pour Studio (étape 5),
+        monté via `add_langgraph_fastapi_endpoint` sur une nouvelle route `/copilotkit`
+        (`ai-service/main.py`), instance de graphe séparée (son propre `InMemorySaver`) de celle du
+        SSE fait main `/chat`+`/confirm` (qui reste utilisé tel quel, inchangé). Validé en live
+        (local ET Docker) : requête AG-UI brute → vraie exécution du graphe (tool call
+        `get_active_batches` réel), événements protocole conformes (`RUN_STARTED`,
+        `TOOL_CALL_START/END`, `STATE_SNAPSHOT`...).
+      - **Partie 2 (gateway, faite — la plus incertaine)** : pas d'adaptateur Fastify officiel pour
+        `@copilotkit/runtime` (seulement Next.js/Express/Nest nommément supportés) ; une issue
+        GitHub documentait un adaptateur générique cassant avec un autre framework (Hono) — risque
+        explicitement signalé à l'utilisateur avant de tenter. Monté quand même via
+        `copilotRuntimeNodeHttpEndpoint(...)` appelé directement avec `req.raw`/`reply.raw` (Node
+        `IncomingMessage`/`ServerResponse` — exactement le type que Fastify expose), `reply.hijack()`
+        pour laisser le handler écrire la réponse lui-même. **Ça marche** : testé en Docker,
+        401 sans session (auth `requireAuth` intacte malgré le hijack), 400 avec une erreur
+        structurée du runtime CopilotKit lui-même (donc le handler tourne réellement, pas un crash
+        Fastify/Hono-style). `copilotKitEndpoint({url})` utilisé (pas `langGraphPlatformEndpoint`,
+        qui attend le protocole complet `langgraph_api`/`/threads`+`/runs`, différent de la route
+        AG-UI custom exposée en partie 1). Effet de bord trouvé et corrigé : le runtime envoie de la
+        télémétrie anonyme par défaut — désactivée (`COPILOTKIT_TELEMETRY_DISABLED=true`), cohérent
+        avec le choix 100% local du projet (LangSmith explicitement écarté à l'étape 5 pour la même
+        raison).
+      - **Partie 3 (front React, faite en deux passes — 2026-07-20)**. 1ʳᵉ passe : bug de lecture du
+        corps de requête côté gateway — Fastify bufferise TOUJOURS le corps avant d'appeler un
+        content-type parser (même custom), donc `req.raw` était déjà un flux vidé quand
+        `copilotRuntimeNodeHttpEndpoint` essayait de le relire lui-même ("Invalid JSON payload").
+        Fix : capturer le buffer déjà lu par Fastify (`parseAs: "buffer"`) et reconstruire un flux
+        rejouable (`Readable.from(buffer)` + `Object.assign` des headers/method/url) pour le handler.
+        Puis mauvais appariement de protocole (`copilotKitEndpoint`/`remoteEndpoints` attend une
+        découverte `/info` que notre endpoint Python n'expose pas → "No agents registered") — corrigé
+        en passant à `agents: { strata_assistant: new HttpAgent(...) }` (AG-UI direct, `@ag-ui/client`).
+        **Bug le plus sérieux, trouvé en testant l'acquittement d'une alarme** : `graph.py` avait déjà
+        le correctif tolérant string/dict/bool pour la valeur de résolution de `interrupt()`, mais
+        l'image Docker `ai-service` n'avait jamais été rebuild avec ce correctif — l'ancien code
+        plantait (`AttributeError`) en plein streaming, ce qui coupait le flux vers la gateway, ce qui
+        faisait planter TOUT le process Node (`unhandledRejection` non catché dans les internals
+        undici de `@copilotkit/runtime`) — un bug applicatif ponctuel avait un rayon d'impact bien
+        trop large. Corrigé à deux niveaux : rebuild de l'image (le vrai fix), ET ajout d'un
+        `process.on("unhandledRejection", ...)` côté gateway pour qu'un souci similaire, futur, ne
+        puisse plus jamais faire tomber la gateway entière.
+        Retour utilisateur après un premier essai fonctionnel (v1) : bulle Inspector gênante pour un
+        opérateur (désactivée, `enableInspector={false}`), onglets Threads/Learning confirmés être des
+        fonctionnalités payantes (Enterprise Intelligence Platform — vérifié via recherche), onglet
+        Context vide car `useCopilotReadable` jamais câblé (pas un bug). Tentative de monter
+        `CopilotKitInspector` seul (composant "v2") sur le provider v1 existant → échec
+        ("CopilotKit core not attached", les deux générations ne partagent pas leur contexte React).
+        **Décision, à la demande explicite de l'utilisateur** : migration complète vers la génération
+        "v2" du SDK (`@copilotkit/react-core/v2` pour `CopilotKit`, `CopilotChat`, `useInterrupt`,
+        `CopilotKitInspector` — tout au même endroit, `@copilotkit/react-ui` désinstallé). Bénéfice
+        inattendu : `useInterrupt` (v2) résout avec un OBJET (`resolve({confirmed: bool})`), pas
+        juste une string comme `useLangGraphInterrupt` (v1) — correspond exactement à ce que
+        `graph.py::_write_intercept_node` attendait déjà. Régression mineure assumée : les suggestions
+        cliquables (chips) n'ont pas d'équivalent en prop directe sur `<CopilotChat>` v2.
+        Inspecteur IA rendu accessible via un onglet dédié dans la page Admin (pas la bulle flottante).
+- [x] **Étape 6bis — retour en arrière : CopilotKit → assistant-ui (2026-07-23)**. Rétrospective
+      honnête demandée par l'utilisateur (déclenchée par le tableau comparatif des frontends sur
+      le site LangChain) : CopilotKit n'était pas le bon choix pour Strata. Son vrai
+      différenciateur (UI générative pilotée par le graphe) n'a jamais été utilisé ; toute la
+      douleur de l'étape 6 (bufferisation du corps Fastify, crash gateway entier sur une
+      `unhandledRejection` non catchée, confusion v1/v2 du SDK) venait spécifiquement de sa
+      couche runtime Node — un problème qu'assistant-ui n'a pas, car il parle directement le
+      protocole natif LangGraph Platform (`/threads`, `/runs/stream`) au lieu de traduire en AG-UI.
+      Décision, chantier complet en une session :
+      - **`ai-service`** : `copilotkit`/`ag-ui-langgraph` désinstallés ; `main.py` réduit à
+        `/health` + `/ingest/pdf` ; le chat passe désormais par le serveur `langgraph dev` natif
+        lui-même (monté via `langgraph.json` → `"http": {"app": "./main.py:app"}`), qui gère sa
+        propre persistance (checkpointer in-mem). `graph.py` : nouveau nœud `_init_node`
+        inconditionnel en tête de graphe qui calcule `factory_context`/`recipes` lui-même — le
+        protocole standard parlé par assistant-ui n'a aucun moyen d'injecter des champs d'état
+        custom à l'entrée (contrairement à l'ancien `/chat` fait main qui les posait directement).
+      - **`gateway`** : `@copilotkit/runtime`/`@ag-ui/client` et toute la mécanique de rejeu du
+        corps de requête (`parseAs:"buffer"` + `Readable.from`) supprimés — remplacés par un
+        reverse-proxy `@fastify/http-proxy` (`/api/langgraph` → `ai-service`, `preHandler:
+        requireAuth`), qui n'a tout simplement pas cette classe de bug. Le garde-fou
+        `process.on("unhandledRejection", ...)` gardé (généralisé, utile indépendamment du
+        runtime front). ~40 paquets installés au lieu des ~285 de CopilotKit.
+      - **`web`** : `@copilotkit/react-core` retiré ; `@assistant-ui/react` +
+        `@assistant-ui/react-langgraph` + `@langchain/langgraph-sdk` installés. Nouveau
+        `web/src/lib/chatApi.ts` (client SDK partagé). `AssistantView.tsx` réécrit avec les
+        primitives assistant-ui (`ThreadPrimitive`/`MessagePrimitive`/`ComposerPrimitive`) ;
+        confirmation d'écriture via `useLangGraphInterruptState`/`useLangGraphSendCommand`
+        (`sendCommand({resume:"yes"|"no"})`, déjà compatible avec le parsing tolérant existant de
+        `_write_intercept_node`, aucun changement graphe nécessaire).
+      - ⚠️ **4 bugs réels trouvés uniquement en testant en direct dans le navigateur** (le
+        typecheck ne les voyait pas) :
+        1. Le SDK LangGraph fait `new URL(apiUrl + path)` sans base — un `apiUrl` relatif
+           (`/api/langgraph`) fait planter le constructeur `URL` dans un navigateur (pas de repli
+           sur `window.location` comme le ferait `fetch`). Fixé en construisant une URL absolue
+           same-origin (`window.location.origin + "/api/langgraph"`).
+        2. Le callback `stream` fait main utilisait `remoteId` (retourné par `initialize()`) au
+           lieu d'`externalId` — `remoteId` est un identifiant de bookkeeping interne à
+           assistant-ui (pas un UUID), pas le vrai thread LangGraph, d'où un
+           `HTTP 400: badly formed hexadecimal UUID string` côté serveur. Fixé en utilisant le
+           helper officiel `unstable_createLangGraphStream({client, assistantId})` d'assistant-ui,
+           qui utilise correctement `externalId`.
+        3. Le composant `Text` par défaut d'assistant-ui affiche un curseur "●" statique (non
+           animé) pendant la génération — remplacé par un composant `Text` custom avec 3 points
+           animés (`MessagePartPrimitive.InProgress`).
+        4. **Fil de conversation perdu à chaque changement d'onglet.** Cause : sans backend
+           "cloud" assistant-ui réel, `useLangGraphRuntime` retombe sur un
+           `InMemoryThreadListAdapter` — toute la liste de threads (pas juste l'id) vit en mémoire
+           React et est détruite dès que le composant qui l'a montée est démonté. Un premier
+           correctif (persister le `threadId` seul via `sessionStorage` + `onThreadIdChange`) n'a
+           pas suffi pour cette raison. Fix réel : `useLangGraphRuntime`/`AssistantRuntimeProvider`
+           déplacés dans `Layout.tsx` (montés une seule fois, enveloppent `<Outlet/>`, jamais
+           démontés à la navigation) — exactement l'architecture que CopilotKit utilisait déjà,
+           `AssistantView.tsx` ne fait plus que consommer le contexte ambiant.
+      - **Nettoyage du code mort découvert au passage** : `gateway/src/assistant.ts` (~980 lignes,
+        l'agent TS maison v1-v4 originel, « Chemin B » de la section précédente) montait encore
+        `/api/assistant/chat`+`/confirm`+`/cancel` mais plus rien dans `web/` ne les appelait —
+        supprimé entièrement. Seule sa fonction `embed()` était encore utilisée (par
+        `/api/knowledge/search`, le RAG) : extraite dans un nouveau `gateway/src/embeddings.ts`.
+        Onglet "Inspecteur IA" (AG-UI, étape 6/7) retiré d'`AdminView.tsx` — pas d'équivalent
+        assistant-ui décidé, question ouverte pour plus tard (ex. lien direct vers LangGraph
+        Studio, déjà exposé en dev depuis l'étape 5).
+        ⚠️ Note pour une future « étape 6 réelle » (exécution effective des actions confirmées) :
+        `assistant.ts` contenait la seule implémentation existante d'exécution réelle avec
+        re-vérification RBAC par le VRAI utilisateur (`/api/assistant/confirm` : `can(user,
+        "write", tag)`) — supprimée avec le reste. Récupérable via l'historique git si besoin de
+        référence, mais l'implémentation finale devra de toute façon vivre dans `ai-service`
+        (identité opérateur à faire transiter depuis le front, cf. avertissement en tête de
+        `graph.py`), pas être ressuscitée telle quelle.
+      Validé en direct par l'utilisateur : chat + streaming normal, cycle interrupt/confirmation
+      d'écriture (acquittement d'alarme), et persistance de la conversation à la navigation entre
+      pages. Gateway redémarré proprement après le nettoyage ; `/api/knowledge/search` re-testé et
+      toujours fonctionnel après extraction d'`embed()`.
+- [x] **Étape 7 — page Admin « Base de connaissances » (2026-07-20)**. Remplace le script CLI
+      (`ai-service/ingest.py`, lancé à la main) par une vraie interface : liste des documents,
+      statut d'embedding, upload. `ai-service/ingest.py` refactorisé — `ingest_pdf_bytes(filename,
+      data: bytes)` réutilisable depuis le CLI (lit le disque) ET une nouvelle route
+      `POST /ingest/pdf` (reçoit `{filename, content_base64}`, décode, même pipeline). Nouvelles
+      routes gateway : `GET /api/knowledge` (liste groupée par document — `regexp_replace` sur le
+      titre pour retirer le suffixe " — chunk i/N" posé par `ingest.py`, PAS de migration de schéma ;
+      les entrées manuelles de `seed-knowledge.ts`, sans ce suffixe, s'affichent comme leur propre
+      document à 1 chunk) et `POST /api/knowledge/upload` (relaie le PDF à `ai-service`, la gateway
+      ne fait que transporter les octets — même invariant que `/api/copilotkit`). Upload : PDF lu
+      côté navigateur (`FileReader.readAsDataURL` → base64), pas de multipart — même convention que
+      `importTagsCsv` pour le CSV (aucune dépendance multipart ajoutée à la gateway). Onglet "Base de
+      connaissances" dans `AdminView.tsx` (5ᵉ onglet, aux côtés d'Utilisateurs/Rôles/Audit/Inspecteur
+      IA). Validé en live à chaque couche : `ingest_pdf_bytes` direct (4 chunks), `/api/knowledge/
+      upload` via la gateway (4 chunks), `/api/knowledge` (24 documents, bon regroupement 2 PDF + 22
+      entrées manuelles), et `search_knowledge` retrouve le document fraîchement uploadé en 1ʳᵉ
+      position (score 0.764) — le pipeline RAG complet, de l'upload à la recherche, fonctionne
+      bout-en-bout. PDF de test nettoyés après chaque vérification (pas des données de démo).
+      **Ajout (même session)** : le PDF original disparaissait après ingestion (seuls les chunks de
+      texte/embeddings étaient conservés) — aucun moyen de reconsulter le document source. Nouvelle
+      table `knowledge_files` (`bytea`, clé `(category, doc_name)`) : la gateway conserve le fichier
+      reçu EN PLUS de le relayer à `ai-service` pour l'ingestion (`ai-service` ne stocke jamais rien
+      après ingestion — seule la gateway a une base à écrire dedans, même invariant que tout le
+      chantier). Nouvelle route `GET /api/knowledge/:category/:docName/file` (affichage inline,
+      `Content-Disposition: inline`) ; bouton "Ouvrir le PDF" dans l'onglet, visible seulement quand
+      `has_file` (LEFT JOIN dans `/api/knowledge`) — les entrées manuelles n'ont jamais de fichier.
+      Les 2 PDF de démo ingérés avant cet ajout ont été ré-uploadés pour combler leur fichier
+      manquant. Validé : fichier téléchargé via la route est byte-à-byte identique à l'original
+      (`diff`), bon `Content-Type`/`Content-Disposition`.
+
 ### Documentation utilisateur / aide en ligne (in-app)
 But : qu'un **utilisateur non-tech** découvre **toutes** les features et **comment les utiliser**.
 À distinguer des docs **dev/infra** existantes (`docs/`, ce fichier) : ici c'est du **produit/end-user**.

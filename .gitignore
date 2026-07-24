@@ -149,6 +149,11 @@ CLAUDE.md
 __pycache__/
 *.pyc
 .venv/
+# État runtime local de langgraph dev (checkpoints/threads de conversation, pas du code)
+.langgraph_api/
 
 # cookies de test curl
 c.txt
+
+# macOS
+.DS_Store

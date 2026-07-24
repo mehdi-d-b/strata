@@ -8,6 +8,7 @@
     "start": "tsx src/index.ts"
   },
   "dependencies": {
+    "@fastify/http-proxy": "^11.6.0",
     "@fastify/websocket": "^11.0.1",
     "@langchain/core": "^1.2.2",
     "@langchain/textsplitters": "^1.0.1",

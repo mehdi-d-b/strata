@@ -16,6 +16,7 @@ import { randomUUID } from "node:crypto";
 import { Socket } from "node:net";
 import Fastify from "fastify";
 import websocket from "@fastify/websocket";
+import httpProxy from "@fastify/http-proxy";
 import { Kafka, logLevel } from "kafkajs";
 import pg from "pg";
 import {
@@ -34,11 +35,12 @@ import {
 import { deployDevice, undeployDevice } from "./plc4x.js";
 import { AlarmEngine } from "./alarms.js";
 import { BatchTracker } from "./batches.js";
-import { runAssistant, getPending, consumePending, type ChatMessage } from "./assistant.js";
+import { embed } from "./embeddings.js";
 
 const KAFKA_BROKERS = (process.env.KAFKA_BROKERS ?? "redpanda:9092").split(",");
 const PG_DSN =
   process.env.PG_DSN ?? "postgres://strata:strata@timescaledb:5432/strata";
+const AI_SERVICE_URL = process.env.AI_SERVICE_URL ?? "http://ai-service:8000";
 const PORT = Number(process.env.PORT ?? 3001);
 
 // --- Postgres --------------------------------------------------------------
@@ -159,6 +161,18 @@ async function ensureTagExists(name: string) {
 // --- Fastify ---------------------------------------------------------------
 const app = Fastify({ logger: true });
 await app.register(websocket);
+
+// Garde-fou : un rejet de promesse non géré (ex. une erreur interne à un
+// client HTTP tiers, hors de la promesse qu'on attend nous-mêmes) fait par
+// défaut CRASHER tout le process Node — vécu en direct pendant l'intégration
+// CopilotKit (depuis remplacée par un simple proxy) : ai-service avait
+// planté en plein streaming (bug applicatif), la gateway ENTIÈRE était tombée
+// avec lui, pour tous les utilisateurs connectés. On logge et on survit — un
+// souci ponctuel d'un service distant ne doit jamais avoir un rayon d'impact
+// aussi large.
+process.on("unhandledRejection", (err) => {
+  app.log.error({ err }, "unhandledRejection (survécu, pas de crash)");
+});
 
 /** Connexions WS actives, chacune liée à son utilisateur (pour le filtrage RBAC). */
 const clients = new Map<import("ws").WebSocket, AuthUser>();
@@ -652,6 +666,393 @@ app.get("/api/batches", { preHandler: requireAuth }, async (req) => {
   return rows;
 });
 
+// ─── Routes servant de tools au microservice IA (ai-service/) ─────────────
+// Exposent en HTTP ce qui n'existait jusqu'ici QUE dans la logique interne de
+// l'agent fait main (assistant.ts::execTool) — même SQL, thin wrapper. Python
+// n'a aucun accès direct à Postgres/Kafka ; ces routes sont sa seule porte
+// d'entrée vers ces données (cf. docs/roadmap.md, frontière Node↔Python).
+
+// Dossier d'un batch pour enquête qualité (déviations par cuve VS bande
+// nominale, alarmes, changements de consigne, sanitation). Réf = id exact ou
+// recette (= dernier batch de cette recette, ex "ipa" -> dernier batch ipa).
+app.get("/api/batches/:ref/context", { preHandler: requireAuth }, async (req, reply) => {
+  const ref = String((req.params as { ref: string }).ref ?? "").trim();
+  if (!ref) return reply.code(400).send({ error: "ref requis" });
+  const round1 = (v: unknown) => (v == null ? null : Math.round(Number(v) * 10) / 10);
+  const cols = "id, recipe, line, started_at, ended_at, status, qc_verdict, defaut_type, rebut_pct";
+  let b = (await pool.query(`SELECT ${cols} FROM batches WHERE id = $1`, [ref])).rows[0];
+  if (!b) {
+    const recs = (await pool.query("SELECT DISTINCT recipe FROM batches")).rows.map((r) => r.recipe as string);
+    const hit = recs.find((rc) => ref.toLowerCase().includes(rc.toLowerCase()));
+    if (hit)
+      b = (
+        await pool.query(`SELECT ${cols} FROM batches WHERE recipe = $1 ORDER BY started_at DESC LIMIT 1`, [hit])
+      ).rows[0];
+    if (!b) return reply.code(404).send({ error: `batch introuvable: ${ref}`, recettes_connues: recs });
+  }
+  const line = b.line as string;
+  if (!can(req.user, "read", `${line}.fermenteur.temperature`))
+    return reply.code(403).send({ error: `pas le droit de lire la ligne ${line}` });
+  const start = b.started_at as Date;
+  const end = (b.ended_at as Date) ?? new Date();
+
+  const vessels = (
+    await pool.query(`SELECT DISTINCT tag FROM mesures WHERE tag LIKE $1 AND ts BETWEEN $2 AND $3`, [
+      `${line}.%.temperature`,
+      start,
+      end,
+    ])
+  ).rows;
+  const deviations: Record<string, unknown>[] = [];
+  for (const vr of vessels) {
+    const tTag = vr.tag as string;
+    const base = tTag.slice(0, -".temperature".length);
+    const vessel = base.slice(line.length + 1);
+    const band = (
+      await pool.query(
+        `SELECT (SELECT avg(value) FROM mesures WHERE tag=$1 AND ts BETWEEN $3 AND $4) AS cible,
+                (SELECT avg(value) FROM mesures WHERE tag=$2 AND ts BETWEEN $3 AND $4) AS tol`,
+        [`${base}.temp_cible`, `${base}.temp_tol`, start, end],
+      )
+    ).rows[0];
+    const cible = band?.cible == null ? null : Number(band.cible);
+    const tol = band?.tol == null ? null : Number(band.tol);
+    if (cible == null || tol == null) {
+      const st = (
+        await pool.query(
+          `SELECT min(value) AS mn, max(value) AS mx, avg(value) AS av FROM mesures
+           WHERE tag=$1 AND ts BETWEEN $2 AND $3`,
+          [tTag, start, end],
+        )
+      ).rows[0];
+      deviations.push({
+        vessel, nominal: null,
+        observed: { min: round1(st.mn), max: round1(st.mx), avg: round1(st.av) },
+        max_excess: null, pct_out_of_band: null,
+      });
+      continue;
+    }
+    const reg = (
+      await pool.query(
+        `SELECT min(ts) AS t0 FROM mesures
+         WHERE tag=$1 AND ts BETWEEN $2 AND $3 AND value BETWEEN $4 AND $5`,
+        [tTag, start, end, cible - 0.5 * tol, cible + 0.5 * tol],
+      )
+    ).rows[0];
+    const t0 = reg?.t0 as Date | null;
+    const st = (
+      await pool.query(
+        `SELECT min(value) AS mn, max(value) AS mx, avg(value) AS av,
+                count(*) FILTER (WHERE value > $4 OR value < $5) AS nout, count(*) AS n,
+                max(GREATEST(value-$4, $5-value, 0)) AS excess
+         FROM mesures WHERE tag=$1 AND ts BETWEEN $2 AND $3`,
+        [tTag, t0 ?? start, end, cible + tol, cible - tol],
+      )
+    ).rows[0];
+    const n = Number(st.n) || 1;
+    const pctOut = t0 == null ? null : Math.round((100 * Number(st.nout)) / n);
+    const outOfBand = t0 == null ? true : (pctOut ?? 0) >= 5;
+    deviations.push({
+      vessel,
+      out_of_band: outOfBand,
+      nominal: [round1(cible - tol), round1(cible + tol)],
+      observed: { min: round1(st.mn), max: round1(st.mx), avg: round1(st.av) },
+      max_excess: t0 == null ? null : st.excess == null ? 0 : round1(st.excess),
+      pct_out_of_band: pctOut,
+      never_reached_target: t0 == null ? true : undefined,
+    });
+  }
+  const cuvesHorsBande = deviations.filter((d) => d.out_of_band).map((d) => d.vessel);
+
+  const alarms = (
+    await pool.query(
+      `SELECT tag, severity, message, raised_at FROM alarms
+       WHERE raised_at BETWEEN $2 AND $3 AND tag LIKE $1 ORDER BY raised_at LIMIT 50`,
+      [`${line}.%`, start, end],
+    )
+  ).rows;
+  const setpoints = (
+    await pool.query(
+      `SELECT tag, min(value) AS from_v, max(value) AS to_v FROM mesures
+       WHERE tag LIKE $1 AND ts BETWEEN $2 AND $3 GROUP BY tag HAVING min(value) <> max(value)`,
+      [`${line}.%.temp_cible`, start, end],
+    )
+  ).rows.map((r) => ({ tag: r.tag, from: round1(r.from_v), to: round1(r.to_v) }));
+  const cipRow = (
+    await pool.query(`SELECT min(value) AS m FROM mesures WHERE tag=$1 AND ts BETWEEN $2 AND $3`, [
+      `${line}.cip_ok`,
+      start,
+      end,
+    ])
+  ).rows[0];
+  const cipOk = cipRow?.m == null ? null : Number(cipRow.m) >= 1;
+
+  return {
+    conforme: b.qc_verdict === "ok",
+    cuves_hors_bande: cuvesHorsBande,
+    batch: {
+      id: b.id, recipe: b.recipe, line, started_at: b.started_at, ended_at: b.ended_at,
+      status: b.status, qc_verdict: b.qc_verdict, defaut_type: b.defaut_type, rebut_pct: b.rebut_pct,
+    },
+    cip_ok: cipOk,
+    deviations,
+    alarms_during: alarms.map((a) => ({ tag: a.tag, severity: a.severity, message: a.message, at: a.raised_at })),
+    setpoint_changes: setpoints,
+  };
+});
+
+// Introspection : tables/colonnes lisibles par le rôle strata_ro (source de
+// vérité = les grants réels, pas une liste en dur). À appeler avant /api/query-readonly.
+// Remonte les COMMENT ON COLUMN existants (ex: oee_line.running_tag, cf.
+// infra/timescale/init/09-oee.sql) : la doc du schéma vit dans le schéma
+// lui-même, pas dans le prompt système de l'assistant — un commentaire ajouté
+// ici est automatiquement vu par describe_schema, sans jamais toucher au code
+// de l'agent (ni sa taille de prompt).
+app.get("/api/schema", { preHandler: requireAuth }, async () => {
+  const { rows } = await pool.query(
+    `SELECT c.table_name, c.column_name, c.data_type,
+            col_description(format('%I.%I', c.table_schema, c.table_name)::regclass::oid, c.ordinal_position) AS comment
+     FROM information_schema.columns c
+     WHERE c.table_schema = 'public'
+       AND c.table_name IN (
+         SELECT table_name FROM information_schema.role_table_grants
+         WHERE grantee = 'strata_ro' AND privilege_type = 'SELECT' AND table_schema = 'public'
+       )
+     ORDER BY c.table_name, c.ordinal_position`,
+  );
+  const schema: Record<string, string[]> = {};
+  for (const r of rows) {
+    const entry = r.comment ? `${r.column_name}:${r.data_type} — ${r.comment}` : `${r.column_name}:${r.data_type}`;
+    (schema[r.table_name] ??= []).push(entry);
+  }
+  return schema;
+});
+
+// Sandbox SQL en LECTURE SEULE : une requête SELECT, rôle strata_ro, transaction
+// READ ONLY, timeout, LIMIT 500. Mêmes garde-fous qu'avant (assistant.ts en
+// process) — seule la porte d'entrée change (HTTP au lieu d'un appel in-process).
+app.post("/api/query-readonly", { preHandler: requireAuth }, async (req, reply) => {
+  const body = req.body as { sql?: string };
+  let sql = String(body.sql ?? "").trim().replace(/;+\s*$/, "");
+  if (!sql) return reply.code(400).send({ error: "sql requis" });
+  if (sql.includes(";")) return reply.code(400).send({ error: "une seule requête SELECT (pas de ';')" });
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN TRANSACTION READ ONLY");
+    await client.query("SET LOCAL ROLE strata_ro");
+    await client.query("SET LOCAL statement_timeout = '5000ms'");
+    const { rows } = await client.query(`SELECT * FROM (${sql}) AS _sub LIMIT 500`);
+    return rows;
+  } catch (e) {
+    return reply.code(400).send({ error: (e as Error).message });
+  } finally {
+    await client.query("ROLLBACK").catch(() => {});
+    client.release();
+  }
+});
+
+// Recherche sémantique dans la base de connaissances (SOPs, causes de défauts,
+// incidents). pgvector, top 5 par similarité cosinus.
+app.post("/api/knowledge/search", { preHandler: requireAuth }, async (req, reply) => {
+  const body = req.body as { query?: string };
+  const query = String(body.query ?? "").trim();
+  if (!query) return reply.code(400).send({ error: "query requis" });
+  const vec = await embed(query);
+  const { rows } = await pool.query(
+    `SELECT category, title, body, 1 - (embedding <=> $1::vector) AS score
+     FROM knowledge WHERE embedding IS NOT NULL
+     ORDER BY embedding <=> $1::vector LIMIT 5`,
+    [`[${vec.join(",")}]`],
+  );
+  if (rows.length === 0) return { message: "Aucun document trouvé dans la base de connaissances." };
+  return rows.map((r) => ({ category: r.category, title: r.title, body: r.body, score: Number(r.score).toFixed(3) }));
+});
+
+// Upsert d'un chunk dans la base de connaissances. L'embedding est calculé côté
+// appelant (ai-service, via Ollama) — cette route ne fait que stocker, elle
+// n'a pas besoin de connaître le modèle d'embedding utilisé. Idempotent
+// (ON CONFLICT category+title, comme seed-knowledge-pdf.ts).
+app.post("/api/knowledge/ingest", { preHandler: requireAuth }, async (req, reply) => {
+  const body = req.body as { category?: string; title?: string; body?: string; embedding?: number[] };
+  const category = String(body.category ?? "").trim();
+  const title = String(body.title ?? "").trim();
+  const text = String(body.body ?? "");
+  const embedding = body.embedding;
+  if (!category || !title || !text) return reply.code(400).send({ error: "category, title et body requis" });
+  if (!Array.isArray(embedding) || embedding.length === 0)
+    return reply.code(400).send({ error: "embedding requis (tableau de nombres)" });
+  await pool
+    .query(`ALTER TABLE knowledge ADD CONSTRAINT IF NOT EXISTS knowledge_category_title_key UNIQUE (category, title)`)
+    .catch(() => {});
+  await pool.query(
+    `INSERT INTO knowledge (category, title, body, embedding)
+     VALUES ($1, $2, $3, $4::vector)
+     ON CONFLICT (category, title) DO UPDATE
+       SET body = EXCLUDED.body, embedding = EXCLUDED.embedding, updated_at = now()`,
+    [category, title, text, `[${embedding.join(",")}]`],
+  );
+  return { ok: true, category, title };
+});
+
+// Liste groupée des documents pour la page Admin « Base de connaissances »
+// (étape 7). Regex plutôt qu'une colonne dédiée : pas de migration de schéma
+// nécessaire — la convention "<fichier> — chunk i/N" posée par
+// ai-service/ingest.py suffit à regrouper les chunks d'un même PDF ; les
+// entrées manuelles (seed-knowledge.ts, sans ce suffixe) s'affichent comme
+// leur propre document à 1 "chunk".
+app.get("/api/knowledge", { preHandler: requireAdmin }, async () => {
+  const { rows } = await pool.query(
+    `SELECT k.doc_name, k.category, k.chunks, k.updated_at, k.embedded,
+            (f.doc_name IS NOT NULL) AS has_file
+     FROM (
+       SELECT regexp_replace(title, ' — chunk \\d+/\\d+$', '') AS doc_name,
+              category, count(*)::int AS chunks, max(updated_at) AS updated_at,
+              bool_and(embedding IS NOT NULL) AS embedded
+       FROM knowledge
+       GROUP BY doc_name, category
+     ) k
+     LEFT JOIN knowledge_files f ON f.doc_name = k.doc_name AND f.category = k.category
+     ORDER BY k.updated_at DESC`,
+  );
+  return rows;
+});
+
+// Sert le PDF original (affichage inline dans le navigateur). Seuls les
+// documents uploadés APRÈS l'ajout de knowledge_files ont un fichier stocké —
+// les entrées manuelles (seed-knowledge.ts, jamais un PDF) n'en ont jamais.
+app.get("/api/knowledge/:category/:docName/file", { preHandler: requireAdmin }, async (req, reply) => {
+  const { category, docName } = req.params as { category: string; docName: string };
+  const { rows } = await pool.query(
+    `SELECT filename, data FROM knowledge_files WHERE category = $1 AND doc_name = $2`,
+    [category, docName],
+  );
+  if (rows.length === 0) return reply.code(404).send({ error: "fichier introuvable" });
+  reply
+    .header("content-type", "application/pdf")
+    .header("content-disposition", `inline; filename="${rows[0].filename}"`)
+    .send(rows[0].data);
+});
+
+// Upload PDF -> RAG : relaie le fichier (lu en base64 côté front, même
+// convention que importTagsCsv pour le CSV) à ai-service, seul propriétaire
+// du pipeline d'extraction/découpage/embedding — la gateway ne fait QUE
+// transporter les octets, comme pour le proxy /api/langgraph. Le fichier
+// original est AUSSI conservé ici (knowledge_files) pour permettre de le
+// reconsulter — ai-service ne stocke rien après ingestion, il ne fait que
+// produire des chunks.
+app.post("/api/knowledge/upload", { preHandler: requireAdmin }, async (req, reply) => {
+  const body = req.body as { filename?: string; content_base64?: string };
+  if (!body.filename || !body.content_base64)
+    return reply.code(400).send({ error: "filename et content_base64 requis" });
+  const resp = await fetch(`${AI_SERVICE_URL}/ingest/pdf`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ filename: body.filename, content_base64: body.content_base64 }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) return reply.code(resp.status).send(data);
+
+  const docName = body.filename.replace(/\.pdf$/i, "");
+  await pool
+    .query(`CREATE TABLE IF NOT EXISTS knowledge_files (
+      category text NOT NULL,
+      doc_name text NOT NULL,
+      filename text NOT NULL,
+      data bytea NOT NULL,
+      uploaded_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (category, doc_name)
+    )`)
+    .catch(() => {});
+  await pool.query(
+    `INSERT INTO knowledge_files (category, doc_name, filename, data)
+     VALUES ('manuel', $1, $2, $3)
+     ON CONFLICT (category, doc_name) DO UPDATE
+       SET filename = EXCLUDED.filename, data = EXCLUDED.data, uploaded_at = now()`,
+    [docName, body.filename, Buffer.from(body.content_base64, "base64")],
+  );
+  return data;
+});
+
+// État temps réel d'une ou toutes les lignes : machines (marche/attente/arrêt,
+// température), batch en cours, alarmes non acquittées.
+app.get("/api/lines/status", { preHandler: requireAuth }, async (req) => {
+  const q = req.query as { line?: string };
+  const lineFilter = q.line ? String(q.line) : null;
+  const lines = await pool.query(
+    `SELECT line, label FROM oee_line WHERE enabled = true ${lineFilter ? "AND line = $1" : ""} ORDER BY line`,
+    lineFilter ? [lineFilter] : [],
+  );
+  const result = await Promise.all(
+    lines.rows.map(async (l) => {
+      const { rows: tagRows } = await pool.query(
+        `SELECT DISTINCT ON (tag) tag, value, ts
+         FROM mesures
+         WHERE tag LIKE $1 AND (tag LIKE '%.state' OR tag LIKE '%.en_attente' OR tag LIKE '%.temperature')
+         ORDER BY tag, ts DESC`,
+        [`${l.line}.%`],
+      );
+      const machines: Record<string, Record<string, unknown>> = {};
+      for (const r of tagRows) {
+        const parts = r.tag.split(".");
+        const machine = parts[2];
+        const mesure = parts.slice(3).join(".");
+        if (!machines[machine]) machines[machine] = {};
+        if (mesure === "state") machines[machine].state = r.value === 1 ? "marche" : "arrêt";
+        else if (mesure === "en_attente") machines[machine].en_attente = r.value === 1;
+        else if (mesure === "temperature") machines[machine].temperature = Number(r.value).toFixed(1);
+      }
+      const { rows: batchRows } = await pool.query(
+        `SELECT id, recipe FROM batches WHERE line = $1 AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1`,
+        [l.line],
+      );
+      const { rows: alarmRows } = await pool.query(
+        `SELECT count(*)::int AS n FROM alarms WHERE tag LIKE $1 AND (state='active' OR (state='cleared' AND acked=false))`,
+        [`${l.line}.%`],
+      );
+      const machineList = Object.entries(machines).map(([name, m]) => ({
+        name,
+        etat: m.en_attente ? "attente" : m.state,
+        temperature: m.temperature ?? null,
+      }));
+      return {
+        line: l.line,
+        label: l.label,
+        machines: machineList,
+        batch_en_cours: batchRows[0]?.id ?? null,
+        alarmes_non_acquittees: alarmRows[0]?.n ?? 0,
+      };
+    }),
+  );
+  return result;
+});
+
+// Contexte usine (lignes actives, machines par ligne, recettes connues) —
+// injecté dans le system prompt de l'assistant pour qu'il connaisse la
+// topologie réelle sans qu'elle soit codée en dur dans le prompt.
+app.get("/api/factory-context", { preHandler: requireAuth }, async () => {
+  const [lines, machines, recipes] = await Promise.all([
+    pool.query("SELECT line, label, ideal_rate FROM oee_line WHERE enabled = true ORDER BY line"),
+    pool.query(`
+      SELECT split_part(name,'.', 1)||'.'||split_part(name,'.', 2) AS line,
+             split_part(name, '.', 3) AS machine
+      FROM tags
+      WHERE enabled = true
+        AND array_length(string_to_array(name, '.'), 1) = 4
+        AND split_part(name, '.', 4) = 'state'
+      ORDER BY 1, 2`),
+    pool.query("SELECT DISTINCT recipe FROM batches ORDER BY recipe"),
+  ]);
+  const machinesByLine: Record<string, string[]> = {};
+  for (const r of machines.rows) (machinesByLine[r.line] ??= []).push(r.machine);
+  return {
+    lines: lines.rows.map((r) => ({
+      line: r.line, label: r.label, ideal_rate: r.ideal_rate,
+      machines: machinesByLine[r.line] ?? [],
+    })),
+    recipes: recipes.rows.map((r) => r.recipe as string),
+  };
+});
+
 // Historique daté des alarmes. `tag` optionnel (utilisé pour les indicateurs en
 // contexte dans Explorer/Dashboards — superposer les fenêtres d'alarme sur un graphe).
 app.get("/api/alarms/history", { preHandler: requireAuth }, async (req) => {
@@ -1065,78 +1466,6 @@ app.delete("/api/planned-stops/:id", { preHandler: requireAdmin }, async (req) =
   return { ok: true };
 });
 
-// ─── Assistant IA local (profil `ai`, Ollama) — cf. docs/llm-integration.md ──
-// Chemin B : la boucle d'agent vit ici, les tools (lecture) s'exécutent avec le
-// contexte de l'utilisateur connecté. Le LLM ne touche jamais la base en direct.
-app.post("/api/assistant/chat", { preHandler: requireAuth }, async (req, reply) => {
-  const b = req.body as { messages?: ChatMessage[]; message?: string };
-  const history: ChatMessage[] =
-    b.messages?.length ? b.messages : b.message ? [{ role: "user", content: b.message }] : [];
-  if (!history.length) return reply.code(400).send({ error: "messages ou message requis" });
-
-  reply.raw.setHeader("Content-Type", "text/event-stream");
-  reply.raw.setHeader("Cache-Control", "no-cache");
-  reply.raw.setHeader("Connection", "keep-alive");
-  reply.raw.setHeader("X-Accel-Buffering", "no");
-
-  const send = (data: object) => {
-    reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
-  };
-
-  try {
-    const out = await runAssistant(pool, req.user, history, send);
-    await audit(req.user!.username, "assistant.chat", null, { steps: out.steps });
-  } catch (e) {
-    send({ type: "error", message: `assistant indisponible: ${(e as Error).message}` });
-  }
-  reply.raw.end();
-});
-
-// Confirmation d'une action proposée par l'assistant (Part B : propose→confirme→
-// exécute). On RE-vérifie le droit write + on audite ; le LLM n'écrit jamais seul.
-app.post("/api/assistant/confirm", { preHandler: requireAuth }, async (req, reply) => {
-  const { id } = req.body as { id?: string };
-  if (!id) return reply.code(400).send({ error: "id requis" });
-  const p = getPending(id);
-  if (!p) return reply.code(404).send({ error: "action expirée ou introuvable" });
-  if (p.username !== req.user!.username)
-    return reply.code(403).send({ error: "action proposée à un autre utilisateur" });
-  try {
-    if (p.tool === "set_command") {
-      const tag = String(p.args.tag ?? "");
-      const value = Number(p.args.value);
-      if (!tag || Number.isNaN(value)) return reply.code(400).send({ error: "consigne invalide" });
-      if (!can(req.user, "write", tag))
-        return reply.code(403).send({ error: `pas le droit d'écrire sur ${tag}` });
-      await publishCommand(tag, value, `assistant:${req.user!.username}`);
-      await audit(req.user!.username, "assistant.command", tag, { value });
-      consumePending(id);
-      return { ok: true, result: `Consigne ${value} envoyée sur ${tag}.` };
-    }
-    if (p.tool === "ack_alarm") {
-      const alarmId = String(p.args.alarm_id ?? "");
-      const { rows } = await pool.query(
-        `UPDATE alarms SET acked=true, acked_by=$2, acked_at=now() WHERE id=$1 RETURNING tag`,
-        [alarmId, req.user!.username],
-      );
-      if (rows.length === 0) return reply.code(404).send({ error: "alarme introuvable" });
-      await audit(req.user!.username, "assistant.alarm.ack", rows[0].tag);
-      consumePending(id);
-      return { ok: true, result: `Alarme ${alarmId} acquittée.` };
-    }
-    return reply.code(400).send({ error: `action non supportée: ${p.tool}` });
-  } catch (e) {
-    return reply.code(502).send({ error: (e as Error).message });
-  }
-});
-
-// Annulation d'une action proposée (l'humain refuse).
-app.post("/api/assistant/cancel", { preHandler: requireAuth }, async (req) => {
-  const { id } = req.body as { id?: string };
-  if (id) consumePending(id);
-  return { ok: true };
-});
-
 // Objectifs OEE par ligne (cible OEE + objectif de pièces/shift). Admin.
 app.get("/api/oee-targets", { preHandler: requireAdmin }, async () => {
   const { rows } = await pool.query(
@@ -1513,6 +1842,20 @@ app.get("/api/audit", { preHandler: requireAdmin }, async (req) => {
     [limit],
   );
   return rows;
+});
+
+// ─── Proxy vers le serveur LangGraph natif d'ai-service (front assistant-ui,
+// protocole standard /threads+/runs/stream) — remplace le runtime CopilotKit
+// (contournement Fastify pour un flux déjà consommé, plantage undici en
+// prod, confusion v1/v2 côté front — cf. historique dans docs/roadmap.md).
+// La gateway ne fait QUE relayer : aucune logique d'agent ici, `ai-service`
+// reste seul propriétaire du LLM/RAG. @fastify/reply-from gère le streaming
+// nativement (pas besoin de rejouer le corps à la main comme pour CopilotKit).
+app.register(httpProxy, {
+  upstream: AI_SERVICE_URL,
+  prefix: "/api/langgraph",
+  rewritePrefix: "",
+  preHandler: requireAuth,
 });
 
 app.register(async (f) => {

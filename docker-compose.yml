@@ -210,6 +210,8 @@ services:
       # Assistant IA local (profil `ai`) : runtime Ollama + modèle. Absent = chat désactivé.
       OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
       ASSISTANT_MODEL: ${ASSISTANT_MODEL:-qwen2.5:7b}
+      # Proxy vers le serveur LangGraph natif d'ai-service (front assistant-ui).
+      AI_SERVICE_URL: "http://ai-service:8000"
     ports:
       - "3001:3001"
     restart: unless-stopped
@@ -251,6 +253,39 @@ services:
       - "11434:11434"
     volumes:
       - ollama-data:/root/.ollama
+    restart: unless-stopped
+
+  # Microservice IA (FastAPI + LangGraph) : à terme, remplace l'agent fait main
+  # de la gateway (gateway/src/assistant.ts). N'a AUCUN accès direct à Postgres/
+  # Kafka — il parle à la gateway en HTTP, comme n'importe quel client externe.
+  # Sur ce Mac, Ollama tourne nativement (hors Docker) pour le GPU Metal ; d'où
+  # OLLAMA_URL=host.docker.internal, même schéma que le service `gateway`.
+  ai-service:
+    build: ./ai-service
+    container_name: strata-ai-service
+    profiles: ["ai"]
+    depends_on:
+      gateway:
+        condition: service_started
+    environment:
+      GATEWAY_URL: "http://gateway:3001"
+      # Compte de service : ai-service s'authentifie contre la gateway comme
+      # n'importe quel client HTTP (login + cookie), même compte admin que celui
+      # créé au 1er boot (cf. ADMIN_PASSWORD) — jamais l'identité de l'opérateur
+      # qui discute (ce compte ne sert qu'à lire ; l'écriture confirmée est
+      # exécutée par le navigateur, avec la vraie session — cf. graph.py).
+      AI_SERVICE_USERNAME: admin
+      AI_SERVICE_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      # Var dédiée (pas ASSISTANT_MODEL, réservée à la gateway) : sinon
+      # ASSISTANT_MODEL=qwen2.5:14b dans .env écraserait silencieusement ce
+      # défaut. qwen2.5:7b choisi ici après tests de tool-calling (2026-07-17) :
+      # fiable en pratique via LangGraph/ChatOllama, contrairement à mistral:7b
+      # (trop sensible à la formulation exacte) — et même famille que le 14b de
+      # prod, donc le comportement de tool-calling reste comparable.
+      AI_SERVICE_MODEL: ${AI_SERVICE_MODEL:-qwen2.5:7b}
+    ports:
+      - "8000:8000"
     restart: unless-stopped
 
 volumes:

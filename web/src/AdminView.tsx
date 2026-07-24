@@ -1,22 +1,28 @@
-import { useEffect, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ExternalLink, FileText, Plus, Upload, X } from "lucide-react";
+import { toast } from "sonner";
 import {
   createUser,
   fetchAudit,
+  fetchKnowledge,
   fetchRoles,
   fetchUsers,
+  knowledgeFileUrl,
   resetUserPassword,
   setRoleGrants,
   setUserEnabled,
   setUserRoles,
+  uploadKnowledgePdf,
   type AuditRow,
   type Grant,
+  type KnowledgeDoc,
   type RoleRow,
   type UserRow,
 } from "./api";
 import { PageHeader } from "@/components/PageHeader";
 import { Section } from "@/components/Section";
 import { TabBar } from "@/components/TabBar";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -29,11 +35,13 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
-type Tab = "users" | "roles" | "audit";
+type Tab = "users" | "roles" | "audit" | "knowledge" | "assistant";
 const TABS: { id: Tab; label: string }[] = [
   { id: "users", label: "Utilisateurs" },
   { id: "roles", label: "Rôles & droits" },
   { id: "audit", label: "Audit" },
+  { id: "knowledge", label: "Base de connaissances" },
+  { id: "assistant", label: "Assistant IA" },
 ];
 
 export function AdminView() {
@@ -48,7 +56,115 @@ export function AdminView() {
       {tab === "users" && <UsersSection />}
       {tab === "roles" && <RolesSection />}
       {tab === "audit" && <AuditSection />}
+      {tab === "knowledge" && <KnowledgeSection />}
+      {tab === "assistant" && <AssistantSection />}
     </>
+  );
+}
+
+// ─── Base de connaissances (RAG) — étape 7 ─────────────────────────────────
+// Remplace le script CLI (ai-service/ingest.py) par une vraie interface :
+// liste des documents (chunks PDF regroupés par fichier), statut d'embedding,
+// upload. Le PDF est lu côté navigateur (FileReader -> base64) et envoyé en
+// JSON — même convention que importTagsCsv pour le CSV, pas de multipart.
+function KnowledgeSection() {
+  const [docs, setDocs] = useState<KnowledgeDoc[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const load = () => fetchKnowledge().then(setDocs).catch(() => setDocs([]));
+  useEffect(() => {
+    load();
+  }, []);
+
+  const onFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+      const r = await uploadKnowledgePdf(file.name, base64);
+      toast.success(`« ${r.filename} » ingéré — ${r.chunks} chunk(s).`);
+      load();
+    } catch {
+      toast.error("Échec de l'ingestion du PDF.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <Section
+      title="Documents (RAG)"
+      hint="PDF ingérés dans la base de connaissances — utilisés par l'assistant (search_knowledge)."
+      action={
+        <>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf"
+            className="hidden"
+            onChange={onFileSelected}
+          />
+          <Button size="sm" disabled={uploading} onClick={() => fileInputRef.current?.click()}>
+            <Upload />
+            {uploading ? "Ingestion…" : "Importer un PDF"}
+          </Button>
+        </>
+      }
+    >
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Document</TableHead>
+            <TableHead>Catégorie</TableHead>
+            <TableHead>Chunks</TableHead>
+            <TableHead>Mis à jour</TableHead>
+            <TableHead>Embeddings</TableHead>
+            <TableHead />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {docs.map((d) => (
+            <TableRow key={`${d.category}-${d.doc_name}`}>
+              <TableCell>{d.doc_name}</TableCell>
+              <TableCell className="text-muted-foreground">{d.category}</TableCell>
+              <TableCell className="tabular-nums">{d.chunks}</TableCell>
+              <TableCell className="tabular-nums">{new Date(d.updated_at).toLocaleString()}</TableCell>
+              <TableCell>
+                <Badge variant={d.embedded ? "outline" : "destructive"}>
+                  {d.embedded ? "OK" : "manquant"}
+                </Badge>
+              </TableCell>
+              <TableCell>
+                {d.has_file && (
+                  <Button size="sm" variant="ghost" asChild>
+                    <a href={knowledgeFileUrl(d.category, d.doc_name)} target="_blank" rel="noreferrer">
+                      <FileText />
+                      Ouvrir le PDF
+                    </a>
+                  </Button>
+                )}
+              </TableCell>
+            </TableRow>
+          ))}
+          {docs.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={6} className="text-muted-foreground">
+                Aucun document dans la base de connaissances.
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+    </Section>
   );
 }
 
@@ -298,6 +414,35 @@ function AuditSection() {
           )}
         </TableBody>
       </Table>
+    </Section>
+  );
+}
+
+// ─── Assistant IA ────────────────────────────────────────────────────────────
+// Remplace l'onglet "Inspecteur IA" (AG-UI, retiré avec CopilotKit) : plus de
+// panneau intégré côté assistant-ui, mais ai-service tourne déjà avec
+// `langgraph dev` et publie son port directement sur l'hôte (docker-compose.yml,
+// profil `ai`) — spécifiquement pour LangGraph Studio, déjà utilisé en dev
+// depuis l'étape 5 du roadmap. Un simple lien suffit, aucun nouveau backend.
+const LANGGRAPH_STUDIO_URL = "https://smith.langchain.com/studio/?baseUrl=http://localhost:8000";
+
+function AssistantSection() {
+  return (
+    <Section
+      title="Assistant IA"
+      hint="Nécessite ai-service démarré (profil Docker « ai ») et un navigateur sur la même machine (URL localhost)."
+    >
+      <p className="text-sm text-muted-foreground">
+        Le débogage de l'agent (graphe, appels d'outils, état, historique des runs) se fait via
+        LangGraph Studio, qui se connecte directement à <code>ai-service</code> (aucune donnée ne
+        transite par un tiers — seule l'interface est hébergée).
+      </p>
+      <Button asChild className="mt-3">
+        <a href={LANGGRAPH_STUDIO_URL} target="_blank" rel="noreferrer">
+          Ouvrir LangGraph Studio
+          <ExternalLink className="size-4" />
+        </a>
+      </Button>
     </Section>
   );
 }

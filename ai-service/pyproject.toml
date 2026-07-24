@@ -1,0 +1,23 @@
+[project]
+name = "ai-service"
+version = "0.1.0"
+description = "Microservice IA de Strata (FastAPI + LangGraph) — remplace l'agent fait main de la gateway."
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "langgraph>=0.2",
+  "langchain-ollama>=0.2",
+  "httpx>=0.27",
+  "langchain-text-splitters>=0.3",
+  "pypdf>=5.0",
+  # Le serveur LangGraph (langgraph-cli[inmem]) sert désormais le chat en
+  # continu (front assistant-ui, protocole /threads+/runs/stream) — plus un
+  # outil de débogage ponctuel (étape 5), donc plus une dépendance dev-only.
+  # CopilotKit (copilotkit, ag-ui-langgraph) retiré : migration vers
+  # assistant-ui, protocole LangGraph Platform natif, pas de couche AG-UI.
+  "langgraph-cli[inmem]>=0.2",
+]
+
+[tool.uv]
+package = false

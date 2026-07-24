@@ -541,44 +541,25 @@ export const savePlannedStop = (body: {
 export const deletePlannedStop = (id: string) =>
   api(`/api/planned-stops/${encodeURIComponent(id)}`, { method: "DELETE" });
 
-// ─── Assistant (copilote LLM local, lecture seule via la gateway) ──────────
+// ─── Base de connaissances (RAG) — page Admin, étape 7 ─────────────────────
 
-export type ChatMessage = { role: "user" | "assistant"; content: string };
+export type KnowledgeDoc = {
+  doc_name: string;
+  category: string;
+  chunks: number;
+  updated_at: string;
+  embedded: boolean;
+  has_file: boolean;
+};
 
-export type AgentEvent =
-  | { type: "tool_call"; step: number; name: string }
-  | { type: "tool_result"; step: number; name: string; ms: number; result_bytes: number }
-  | { type: "token"; step: number; content: string }
-  | { type: "answer"; answer: string; steps: number; total_ms: number }
-  | { type: "error"; message: string };
+export const fetchKnowledge = () => api<KnowledgeDoc[]>("/api/knowledge");
 
-export async function assistantChat(
-  messages: ChatMessage[],
-  onEvent: (e: AgentEvent) => void,
-): Promise<void> {
-  const resp = await fetch("/api/assistant/chat", {
+/** URL du PDF original (affichage inline) — utilisée directement dans un <a>, pas via `api()`. */
+export const knowledgeFileUrl = (category: string, docName: string) =>
+  `/api/knowledge/${encodeURIComponent(category)}/${encodeURIComponent(docName)}/file`;
+
+export const uploadKnowledgePdf = (filename: string, contentBase64: string) =>
+  api<{ filename: string; chunks: number }>("/api/knowledge/upload", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ filename, content_base64: contentBase64 }),
   });
-  if (!resp.ok || !resp.body) {
-    onEvent({ type: "error", message: resp.status === 502 ? "Assistant indisponible — Ollama est-il démarré ?" : "Erreur de l'assistant." });
-    return;
-  }
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const blocks = buf.split("\n\n");
-    buf = blocks.pop() ?? "";
-    for (const block of blocks) {
-      const line = block.split("\n").find((l) => l.startsWith("data: "));
-      if (!line) continue;
-      try { onEvent(JSON.parse(line.slice(6))); } catch { /* ignore malformed */ }
-    }
-  }
-}

@@ -9,6 +9,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@assistant-ui/react": "^0.14.27",
+    "@assistant-ui/react-langgraph": "^0.14.12",
+    "@langchain/langgraph-sdk": "^1.9.28",
     "@tailwindcss/vite": "^4.3.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

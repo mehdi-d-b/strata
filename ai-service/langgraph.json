@@ -1,0 +1,9 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "strata-assistant": "./graph.py:graph"
+  },
+  "http": {
+    "app": "./main.py:app"
+  }
+}
