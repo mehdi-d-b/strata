@@ -5,13 +5,14 @@ sur le format attendu, ex. "brasserie.blonde" et pas juste "blonde"), même
 comportement, pour rester interchangeable avec l'agent fait main tant que les
 deux coexistent.
 
-set_command/ack_alarm (écriture) sont déclarés ici pour leur schéma (le modèle
-doit savoir qu'ils existent), mais ne sont JAMAIS exécutés par un ToolNode —
-graph.py les intercepte avant dispatch et renvoie une proposition à confirmer.
-Ne pas les appeler depuis ce module changerait cette garantie de sécurité.
+request_operation/adjust_setpoint/ack_alarm (écriture) sont déclarés ici pour
+leur schéma (le modèle doit savoir qu'ils existent), mais ne sont JAMAIS
+exécutés par un ToolNode — graph.py les intercepte avant dispatch et renvoie
+une proposition à confirmer. Ne pas les appeler depuis ce module changerait
+cette garantie de sécurité.
 """
 import json
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import quote
 
 from langchain_core.tools import tool
@@ -21,7 +22,12 @@ import gateway
 
 # Tools d'écriture : jamais exécutés automatiquement (cf. graph.py). Même
 # invariant que WRITE_TOOLS dans assistant.ts.
-WRITE_TOOLS = {"set_command", "ack_alarm"}
+WRITE_TOOLS = {"request_operation", "adjust_setpoint", "ack_alarm"}
+
+# Les 3 seules cuves qui existent réellement dans le simulateur (brain.py,
+# Recipe.vessels) — enum fermé pour qu'un modèle ne puisse jamais inventer un
+# nom de machine, même invariant que operation_id sur request_operation.
+VESSELS = Literal["empateur", "ebullition", "fermenteur"]
 
 _MAX_ROWS = 30
 
@@ -254,14 +260,37 @@ async def get_active_batches() -> str:
 
 
 @tool
-async def set_command(
-    tag: Annotated[str, Field(description="tag cible (ex 'brasserie.ipa.fermenteur.temp_consigne')")],
-    value: float,
+async def request_operation(
+    operation_id: Annotated[
+        Literal["start_line", "stop_line"],
+        Field(description="opération métier exacte : 'start_line' ou 'stop_line'"),
+    ],
+    line: Annotated[
+        str,
+        Field(description="préfixe de ligne réel, ex 'brasserie.blonde'"),
+    ],
 ) -> str:
-    """PROPOSE d'écrire une consigne (setpoint) sur un tag. ACTION soumise à
-    CONFIRMATION humaine — n'exécute rien directement."""
-    # Jamais exécuté ici : graph.py intercepte set_command avant tout dispatch.
-    return json.dumps({"error": "set_command ne doit jamais être exécuté directement"})
+    """PROPOSE une opération métier cataloguée sur une ligne. Opérations disponibles :
+    start_line (démarrage normal) et stop_line (arrêt normal). Ne propose jamais
+    de tag, valeur, séquence PLC ou arrêt d'urgence : la gateway résout et valide
+    l'opération après confirmation humaine."""
+    # Jamais exécuté ici : graph.py intercepte request_operation avant tout dispatch.
+    return json.dumps({"error": "request_operation ne doit jamais être exécuté directement"})
+
+
+@tool
+async def adjust_setpoint(
+    line: Annotated[str, Field(description="préfixe de ligne réel, ex 'brasserie.blonde'")],
+    vessel: Annotated[VESSELS, Field(description="cuve concernée : empateur, ebullition ou fermenteur")],
+    value: Annotated[float, Field(description="nouvelle température cible, en °C")],
+) -> str:
+    """PROPOSE d'ajuster la consigne de température (temp_cible) d'une cuve.
+    UN AJUSTEMENT, pas un changement de recette : la gateway refuse tout écart
+    trop important par rapport à la consigne actuelle. Ne propose jamais de tag
+    brut ni ne calcule toi-même un écart limite — la gateway le fait après
+    confirmation humaine."""
+    # Jamais exécuté ici : graph.py intercepte adjust_setpoint avant tout dispatch.
+    return json.dumps({"error": "adjust_setpoint ne doit jamais être exécuté directement"})
 
 
 @tool
@@ -275,5 +304,5 @@ ALL_TOOLS = [
     get_oee, get_production, list_alarms, get_history, get_batch_context,
     describe_schema, query_readonly, search_knowledge, get_line_status,
     get_shift_summary, get_oee_breakdown, get_active_batches,
-    set_command, ack_alarm,
+    request_operation, adjust_setpoint, ack_alarm,
 ]

@@ -327,7 +327,7 @@ rétention sans toucher au SQL »).
       describe→query (thrash) — testé sur l'ancienne machine, CPU seul. **À réévaluer sur le
       Mac M4 (GPU Metal, 16 Go) avec un modèle 14B.**
 - [x] **v2 — Part B : action encadrée** (propose → confirme → exécute) : write tools
-      (`set_command`, `ack_alarm`) **interceptés** par la boucle → proposition à **confirmation
+      (`request_operation`, `ack_alarm`) **interceptés** par la boucle → proposition à **confirmation
       humaine** (`pending_action`) ; `POST /api/assistant/confirm` re-vérifie `can(write)`, exécute,
       audite, **consomme** (one-shot). **Validé en live** (le 3B propose, l'humain confirme, l'ack
       s'exécute). Sûr même avec un petit modèle (l'humain est le garde-fou).
@@ -427,7 +427,7 @@ rétention sans toucher au SQL »).
         → `agent`, sinon direct → `agent`. Validé en live : « Pourquoi le dernier batch ipa est-il
         hors spec ? » déclenche bien la séquence forcée, résout « dernier ipa » côté serveur,
         conclut sur `cip_ok`/`cuves_hors_bande` sans halluciner.
-      - **Tools d'écriture interceptés** (`set_command`, `ack_alarm`) : routées vers un nœud dédié
+      - **Tools d'écriture interceptés** (`request_operation`, `ack_alarm`) : routées vers un nœud dédié
         AVANT tout `ToolNode` — jamais exécutées, réponse = proposition à confirmer. Persistance +
         `/confirm` réels repoussés à l'étape 4 (`interrupt()` + checkpointer Postgres) ; pour
         l'instant la proposition est éphémère (pas de `PENDING` map côté Python).

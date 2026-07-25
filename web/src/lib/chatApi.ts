@@ -18,6 +18,11 @@ export const client = new Client({
   onRequest: (_url, init) => ({ ...init, credentials: "include" }),
 });
 
-export const createThread = () => client.threads.create();
+/** La gateway crée le thread et lui attache le propriétaire authentifié. */
+export const createThread = () =>
+  fetch("/api/assistant/threads", { method: "POST", credentials: "include" }).then(async (response) => {
+    if (!response.ok) throw new Error("création de conversation indisponible");
+    return response.json() as Promise<{ thread_id: string }>;
+  });
 
 export const getThreadState = (threadId: string) => client.threads.getState(threadId);

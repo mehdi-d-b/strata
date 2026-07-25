@@ -8,17 +8,17 @@ import {
 } from "@assistant-ui/react";
 import { useLangGraphInterruptState, useLangGraphSendCommand } from "@assistant-ui/react-langgraph";
 import { Send } from "lucide-react";
-import { ackAlarm, sendCommand as sendTagCommand } from "@/api";
+import { ackAlarm, adjustSetpoint, executeOperation } from "@/api";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 
 type PendingAction = { tool: string; args: Record<string, unknown>; summary?: string };
 
 /**
- * Proposition d'écriture (set_command/ack_alarm) en attente de confirmation —
+ * Proposition d'écriture (request_operation/ack_alarm) en attente de confirmation —
  * la boucle interrupt()/reprise de graph.py::_write_intercept_node se branche
  * ici. Étape 6 : "Confirmer" exécute réellement l'action AVANT de reprendre le
- * graphe, via les routes gateway déjà RBAC-checkées de l'app (sendCommand/
+ * graphe, via les routes gateway déjà RBAC-checkées de l'app (executeOperation/
  * ackAlarm) — ai-service ne fait que proposer/se suspendre, jamais écrire
  * lui-même (il s'authentifie en compte de service, pas comme l'opérateur).
  * sendResumeCommand({ resume: "<json>" }) reprend le graphe au point de
@@ -44,8 +44,10 @@ function InterruptCard() {
   const onConfirm = async () => {
     setBusy(true);
     try {
-      if (pending?.tool === "set_command") {
-        await sendTagCommand(String(pending.args.tag), Number(pending.args.value));
+      if (pending?.tool === "request_operation") {
+        await executeOperation(String(pending.args.operation_id), String(pending.args.line));
+      } else if (pending?.tool === "adjust_setpoint") {
+        await adjustSetpoint(String(pending.args.line), String(pending.args.vessel), Number(pending.args.value));
       } else if (pending?.tool === "ack_alarm") {
         await ackAlarm(String(pending.args.alarm_id));
       }
@@ -103,7 +105,7 @@ function AssistantText() {
 }
 
 /**
- * Historique persistant des actions d'écriture (set_command/ack_alarm) : le
+ * Historique persistant des actions d'écriture (request_operation/ack_alarm) : le
  * résultat de _write_intercept_node est déjà dans l'historique du thread
  * (ToolMessage) — on l'affiche au lieu de le laisser invisible, pour que
  * l'opérateur retrouve ce qui a été confirmé/annulé même après coup ou en
@@ -130,7 +132,13 @@ function AssistantMessage() {
         <MessagePrimitive.Parts
           components={{
             Text: AssistantText,
-            tools: { by_name: { set_command: WriteActionResult, ack_alarm: WriteActionResult } },
+            tools: {
+              by_name: {
+                request_operation: WriteActionResult,
+                adjust_setpoint: WriteActionResult,
+                ack_alarm: WriteActionResult,
+              },
+            },
           }}
         />
       </div>

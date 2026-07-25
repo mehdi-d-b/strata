@@ -64,7 +64,11 @@ CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts DESC);
 INSERT INTO roles (name, description) VALUES
     ('admin',    'Accès complet : gestion des utilisateurs, lecture/écriture tous tags'),
     ('operator', 'Lecture tous tags, écriture sur un périmètre donné'),
-    ('viewer',   'Lecture seule')
+    ('viewer',   'Lecture seule'),
+    -- Compte technique du microservice IA. Il ne peut ni administrer ni écrire
+    -- des consignes : les actions confirmées restent exécutées par la session
+    -- réelle de l'opérateur dans la gateway.
+    ('assistant_service', 'Compte technique IA : lecture seule via la gateway')
 ON CONFLICT DO NOTHING;
 
 -- Droits par défaut des rôles de base.
@@ -73,5 +77,6 @@ INSERT INTO grants (role, scope, action) VALUES
     ('admin',    '*', 'write'),
     ('admin',    '*', 'read'),
     ('operator', '*', 'read'),
-    ('viewer',   '*', 'read')
+    ('viewer',   '*', 'read'),
+    ('assistant_service', '*', 'read')
 ON CONFLICT DO NOTHING;

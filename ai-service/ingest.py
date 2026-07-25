@@ -1,26 +1,29 @@
 """Ingestion PDF -> base de connaissances (RAG).
 
-CLI : uv run python ingest.py (relit gateway/knowledge-pdfs/*.pdf).
+CLI : uv run python ingest.py (relit knowledge-pdfs/*.pdf).
 HTTP : POST /ingest/pdf (main.py), pour l'upload depuis la page Admin
 « Base de connaissances » (étape 7) — même fonction `ingest_pdf_bytes`,
 juste une source différente (disque vs upload).
 
-Portage Python de gateway/src/seed-knowledge-pdf.ts, étape 3 du plan de
-migration : extraction et découpage passent en Python — mêmes paramètres
-(chunk_size=1000, overlap=150), mêmes conventions (category='manuel',
-title="<fichier> — chunk i/N").
+Extraction + découpage via Docling (DocumentConverter + HybridChunker), PAS
+pypdf + découpage par taille de caractères (approche précédente) : pypdf n'a
+aucune notion de mise en page — un titre en gras et son corps de texte ne sont
+qu'un flux de caractères identique, donc un découpage par taille recolle
+arbitrairement page de garde, titres et contenu (vérifié en direct : la bonne
+fiche ne remontait plus dans le top 5 d'une recherche pourtant évidente).
+Docling comprend la structure du document (titres, paragraphes) et
+`HybridChunker` découpe le long de ces frontières — marche aussi bien pour un
+PDF généré ici (generate_manual_pdf.py) qu'un vrai manuel scanné/mis en page
+par un automaticien, contrairement à un marqueur de structure fait main qui ne
+profiterait qu'à nos propres PDF.
+`chunker.contextualize()` (pas `chunk.text` brut) préfixe chaque chunk du
+fil de titres parents — un chunk embeddé sait de quelle section il vient.
 
-Extraction via `pypdf` directement, PAS `langchain_community.PyPDFLoader`
-(qui n'est qu'un fin wrapper autour de pypdf) : `langchain-community` a été
-archivé/sunset par LangChain le 19 juin 2026 (annonce du 22 mai 2026,
-https://github.com/langchain-ai/langchain-community/issues/674) — découvert
-en direct via un DeprecationWarning à l'exécution, PAS anticipé (une recherche
-web quelques minutes plus tôt affichait encore PyPDFLoader comme le chemin
-recommandé — doc pas à jour vu la fraîcheur de l'annonce). Même choix que côté
-JS (`pdfjs-dist` en direct plutôt que `@langchain/community`), pour la même
-raison : ne pas dépendre d'un paquet non maintenu pour une simple extraction
-de texte. Seul `langchain-text-splitters` (paquet dédié, toujours maintenu)
-est utilisé du framework ici.
+Coût assumé : Docling embarque un modèle de mise en page (torch), chargé UNE
+SEULE FOIS au niveau module (pas par appel — sinon chaque upload paierait le
+temps de chargement). OCR et extraction de tableaux désactivés (do_ocr=False,
+do_table_structure=False) : nos PDF sont du texte natif, jamais scanné —
+inutile de charger les modèles OCR correspondants.
 
 N'écrit JAMAIS directement dans Postgres : embed ici (Ollama, direct — pas une
 donnée métier), puis POST /api/knowledge/ingest sur la gateway (seule porte
@@ -30,22 +33,39 @@ import asyncio
 import io
 import pathlib
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from pypdf import PdfReader
+from docling.chunking import HybridChunker
+from docling.datamodel.base_models import DocumentStream, InputFormat
+from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.document_converter import DocumentConverter, PdfFormatOption
 
 import gateway
 from embeddings import embed
 
 PDF_DIR = pathlib.Path(__file__).parent / "knowledge-pdfs"
-_SPLITTER = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
+
+_PIPELINE_OPTIONS = PdfPipelineOptions()
+_PIPELINE_OPTIONS.do_ocr = False
+_PIPELINE_OPTIONS.do_table_structure = False
+_CONVERTER = DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=_PIPELINE_OPTIONS)})
+_CHUNKER = HybridChunker()
+
+
+def _convert_and_chunk(filename: str, data: bytes) -> list[str]:
+    """Partie synchrone, CPU-bound (inférence du modèle de mise en page) —
+    isolée pour tourner dans un thread (cf. asyncio.to_thread ci-dessous).
+    Appelée directement dans la boucle async d'ingest_pdf_bytes, le serveur
+    `langgraph dev` (qui sert aussi cette route via main.py) la détecte comme
+    appel bloquant et fait échouer la requête HTTP (le CLI, lui, n'a pas ce
+    garde-fou — d'où un plantage vu uniquement via l'upload Admin, pas en CLI)."""
+    stream = DocumentStream(name=filename, stream=io.BytesIO(data))
+    result = _CONVERTER.convert(stream)
+    return [_CHUNKER.contextualize(c) for c in _CHUNKER.chunk(result.document)]
 
 
 async def ingest_pdf_bytes(filename: str, data: bytes) -> int:
     """Extrait, découpe, embed et upsert un PDF (bytes bruts). Retourne le
     nombre de chunks. `filename` sert de base au titre (sans l'extension)."""
-    reader = PdfReader(io.BytesIO(data))
-    full_text = "\n".join(page.extract_text() or "" for page in reader.pages)
-    chunks = _SPLITTER.split_text(full_text)
+    chunks = await asyncio.to_thread(_convert_and_chunk, filename, data)
 
     base = pathlib.Path(filename).stem
     for i, chunk in enumerate(chunks):

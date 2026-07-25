@@ -13,8 +13,8 @@ import os
 import httpx
 
 GATEWAY_URL = os.environ.get("GATEWAY_URL", "http://localhost:3001")
-AI_SERVICE_USERNAME = os.environ.get("AI_SERVICE_USERNAME", "admin")
-AI_SERVICE_PASSWORD = os.environ.get("AI_SERVICE_PASSWORD", "change-me-en-prod")
+AI_SERVICE_USERNAME = os.environ.get("AI_SERVICE_USERNAME", "assistant-service")
+AI_SERVICE_PASSWORD = os.environ.get("AI_SERVICE_PASSWORD", "")
 
 _client = httpx.AsyncClient(base_url=GATEWAY_URL, timeout=30.0)
 _logged_in = False
@@ -24,6 +24,8 @@ async def _ensure_login() -> None:
     global _logged_in
     if _logged_in:
         return
+    if not AI_SERVICE_PASSWORD:
+        raise RuntimeError("AI_SERVICE_PASSWORD doit être défini pour ai-service")
     resp = await _client.post(
         "/api/auth/login",
         json={"username": AI_SERVICE_USERNAME, "password": AI_SERVICE_PASSWORD},

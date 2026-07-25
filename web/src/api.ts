@@ -202,6 +202,20 @@ export const sendCommand = (tag: string, value: number) =>
     body: JSON.stringify({ tag, value }),
   });
 
+/** Exécute une opération métier résolue côté gateway, jamais un tag libre. */
+export const executeOperation = (operation_id: string, line: string) =>
+  api<{ ok: boolean; operation_id: string; line: string; summary: string }>("/api/operations/execute", {
+    method: "POST",
+    body: JSON.stringify({ operation_id, line }),
+  });
+
+/** Ajuste une consigne de cuve — la gateway borne l'écart, jamais de tag libre. */
+export const adjustSetpoint = (line: string, vessel: string, value: number) =>
+  api<{ ok: boolean; tag: string; value: number; previous: number; summary: string }>(
+    "/api/operations/setpoint",
+    { method: "POST", body: JSON.stringify({ line, vessel, value }) },
+  );
+
 // ─── Automates (devices) & adresses (gestion des tags) ─────────────────────
 
 export const PROTOCOLS = ["modbus-tcp", "s7", "eip", "opcua", "simulated"] as const;

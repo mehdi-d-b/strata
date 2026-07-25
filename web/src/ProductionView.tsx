@@ -14,7 +14,7 @@ import {
   fetchTags,
   saveShift,
   saveTagRole,
-  sendCommand,
+  executeOperation,
   type OeeLine,
   type ProductionRow,
   type Role,
@@ -46,10 +46,9 @@ function scrapRate(r: ProductionRow): string {
 }
 
 // ─── Pilotage : démarrer/arrêter une ligne ─────────────────────────────────
-// Réutilise l'écriture de consigne existante (/api/command -> tags.cmd, même
-// RBAC que CommandBox) sur le `running_tag` déjà configuré côté OEE (convention
-// 1 = en marche) — pas de nouvelle plomberie, juste une UI dédiée au lieu de
-// taper un 0/1 dans un champ numérique.
+// Passe par le catalogue d'opérations de la gateway. Celle-ci résout le tag de
+// marche configuré, vérifie le RBAC et refuse notamment un arrêt normal en plein
+// batch ; cette UI et l'assistant appliquent donc les mêmes garde-fous.
 function PilotageSection() {
   const { user } = useAuth();
   const [lines, setLines] = useState<OeeLine[]>([]);
@@ -88,7 +87,7 @@ function PilotageSection() {
     const running = (state[l.line] ?? 0) >= 1;
     setBusy(l.line);
     try {
-      await sendCommand(l.running_tag!, running ? 0 : 1);
+      await executeOperation(running ? "stop_line" : "start_line", l.line);
       toast.success(
         running ? `Ligne ${l.label ?? l.line} arrêtée.` : `Ligne ${l.label ?? l.line} démarrée.`,
       );

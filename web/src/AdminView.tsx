@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ExternalLink, FileText, Plus, Upload, X } from "lucide-react";
+import { FileText, Plus, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   createUser,
@@ -419,30 +419,17 @@ function AuditSection() {
 }
 
 // ─── Assistant IA ────────────────────────────────────────────────────────────
-// Remplace l'onglet "Inspecteur IA" (AG-UI, retiré avec CopilotKit) : plus de
-// panneau intégré côté assistant-ui, mais ai-service tourne déjà avec
-// `langgraph dev` et publie son port directement sur l'hôte (docker-compose.yml,
-// profil `ai`) — spécifiquement pour LangGraph Studio, déjà utilisé en dev
-// depuis l'étape 5 du roadmap. Un simple lien suffit, aucun nouveau backend.
-const LANGGRAPH_STUDIO_URL = "https://smith.langchain.com/studio/?baseUrl=http://localhost:8000";
-
 function AssistantSection() {
   return (
     <Section
       title="Assistant IA"
-      hint="Nécessite ai-service démarré (profil Docker « ai ») et un navigateur sur la même machine (URL localhost)."
+      hint="Le service assistant est accessible uniquement via la gateway authentifiée."
     >
       <p className="text-sm text-muted-foreground">
-        Le débogage de l'agent (graphe, appels d'outils, état, historique des runs) se fait via
-        LangGraph Studio, qui se connecte directement à <code>ai-service</code> (aucune donnée ne
-        transite par un tiers — seule l'interface est hébergée).
+        Le service LangGraph n'expose plus de port hôte : cela empêche de contourner
+        l'authentification de Strata. Pour déboguer localement, utilisez un override Docker
+        temporaire qui publie le port uniquement sur votre poste de développement.
       </p>
-      <Button asChild className="mt-3">
-        <a href={LANGGRAPH_STUDIO_URL} target="_blank" rel="noreferrer">
-          Ouvrir LangGraph Studio
-          <ExternalLink className="size-4" />
-        </a>
-      </Button>
     </Section>
   );
 }

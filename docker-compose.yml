@@ -204,6 +204,11 @@ services:
       PORT: "3001"
       # Mot de passe du compte admin créé au 1er boot (cf. .env). À changer en prod.
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      # La gateway crée ELLE-MÊME le compte technique assistant-service au boot
+      # (seedAssistantService) — même valeur que sous ai-service:, sinon le
+      # compte créé ici et le mot de passe qu'ai-service essaie ne correspondent
+      # jamais. Oubliée ici lors de l'ajout initial, trouvée en testant en direct.
+      AI_SERVICE_PASSWORD: ${AI_SERVICE_PASSWORD:-change-me-en-prod-assistant}
       KAFKAJS_NO_PARTITIONER_WARNING: "1"
       # API REST de Kafka Connect (profil plc4x) pour déployer les connecteurs générés.
       KAFKA_CONNECT_URL: "http://kafka-connect:8083"
@@ -269,13 +274,13 @@ services:
         condition: service_started
     environment:
       GATEWAY_URL: "http://gateway:3001"
-      # Compte de service : ai-service s'authentifie contre la gateway comme
-      # n'importe quel client HTTP (login + cookie), même compte admin que celui
-      # créé au 1er boot (cf. ADMIN_PASSWORD) — jamais l'identité de l'opérateur
-      # qui discute (ce compte ne sert qu'à lire ; l'écriture confirmée est
-      # exécutée par le navigateur, avec la vraie session — cf. graph.py).
-      AI_SERVICE_USERNAME: admin
-      AI_SERVICE_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      # Compte de service dédié, lecture seule. Il ne partage JAMAIS le secret
+      # admin ; les actions confirmées sont toujours exécutées par la session
+      # navigateur de l'opérateur.
+      AI_SERVICE_USERNAME: assistant-service
+      # Le défaut ne sert qu'au démarrage local ; .env.example fournit une valeur
+      # dédiée. En production, AI_SERVICE_PASSWORD doit être un secret distinct.
+      AI_SERVICE_PASSWORD: ${AI_SERVICE_PASSWORD:-change-me-en-prod-assistant}
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       # Var dédiée (pas ASSISTANT_MODEL, réservée à la gateway) : sinon
       # ASSISTANT_MODEL=qwen2.5:14b dans .env écraserait silencieusement ce
@@ -284,8 +289,8 @@ services:
       # (trop sensible à la formulation exacte) — et même famille que le 14b de
       # prod, donc le comportement de tool-calling reste comparable.
       AI_SERVICE_MODEL: ${AI_SERVICE_MODEL:-qwen2.5:7b}
-    ports:
-      - "8000:8000"
+    # Pas de port hôte : le serveur LangGraph ne doit être joignable que par la
+    # gateway, qui est l'unique frontière d'authentification de l'application.
     restart: unless-stopped
 
 volumes:

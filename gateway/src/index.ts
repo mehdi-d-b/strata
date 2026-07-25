@@ -83,6 +83,18 @@ type TagConfig = {
   description: string | null;
 };
 
+type OperationId = "start_line" | "stop_line";
+
+const OPERATION_LABELS: Record<OperationId, string> = {
+  start_line: "démarrer normalement la ligne",
+  stop_line: "arrêter normalement la ligne",
+};
+
+// Les 3 seules cuves qui existent réellement (simulateur : Recipe.vessels dans
+// brain.py) — même enum fermé que côté ai-service (tools.py::VESSELS).
+const VESSELS = ["empateur", "ebullition", "fermenteur"] as const;
+type Vessel = (typeof VESSELS)[number];
+
 // Cache en mémoire de la config des tags, pour appliquer le scaling au fil de
 // l'eau (temps réel) sans requête SQL par message. Rafraîchi périodiquement et
 // après chaque écriture.
@@ -174,8 +186,11 @@ process.on("unhandledRejection", (err) => {
   app.log.error({ err }, "unhandledRejection (survécu, pas de crash)");
 });
 
+/** Surface minimale du WebSocket utilisée par la gateway, sans dépendre des types internes de ws. */
+type LiveSocket = { readyState: number; send(data: string): void };
+
 /** Connexions WS actives, chacune liée à son utilisateur (pour le filtrage RBAC). */
-const clients = new Map<import("ws").WebSocket, AuthUser>();
+const clients = new Map<LiveSocket, AuthUser>();
 
 app.get("/health", async () => ({ status: "ok" }));
 
@@ -235,6 +250,42 @@ async function requireAdmin(req: { user: AuthUser | null }, reply: import("fasti
   if (!isAdmin(req.user)) return reply.code(403).send({ error: "réservé aux admins" });
 }
 
+/** Réservé au microservice IA : ingestion de chunks, jamais une route front. */
+async function requireAssistantService(req: { user: AuthUser | null }, reply: import("fastify").FastifyReply) {
+  if (!req.user) return reply.code(401).send({ error: "non authentifié" });
+  if (!req.user.roles.includes("assistant_service"))
+    return reply.code(403).send({ error: "réservé au service assistant" });
+}
+
+/** Vérifie que tout thread LangGraph demandé appartient à la session courante. */
+async function requireOwnedAssistantThread(req: import("fastify").FastifyRequest, reply: import("fastify").FastifyReply) {
+  const match = req.url.match(/^\/api\/langgraph\/threads\/([^/?]+)/);
+  if (!match) return;
+  const { rows } = await pool.query(
+    "SELECT 1 FROM assistant_threads WHERE thread_id = $1 AND user_id = $2",
+    [decodeURIComponent(match[1]), req.user!.id],
+  );
+  if (!rows.length) return reply.code(404).send({ error: "conversation introuvable" });
+}
+
+// @fastify/http-proxy typpe son hook en style callback ; on compose donc les
+// deux contrôles ici plutôt que de lui passer le tableau Fastify habituel.
+function requireAssistantProxyAccess(
+  req: import("fastify").FastifyRequest,
+  reply: import("fastify").FastifyReply,
+  done: (error?: Error) => void,
+) {
+  if (!req.user) {
+    reply.code(401).send({ error: "non authentifié" });
+    return;
+  }
+  requireOwnedAssistantThread(req, reply)
+    .then(() => {
+      if (!reply.sent) done();
+    })
+    .catch((error) => done(error as Error));
+}
+
 app.post("/api/auth/login", async (req, reply) => {
   const b = req.body as { username?: string; password?: string };
   if (!b.username || !b.password)
@@ -259,6 +310,20 @@ app.post("/api/auth/logout", async (req, reply) => {
   if (sid) await destroySession(pool, sid);
   clearSessionCookie(reply);
   return { ok: true };
+});
+
+// Création centralisée : le front ne crée plus directement un thread chez
+// LangGraph. La gateway conserve ainsi son propriétaire avant tout échange.
+app.post("/api/assistant/threads", { preHandler: requireAuth }, async (req, reply) => {
+  const upstream = await fetch(`${AI_SERVICE_URL}/threads`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  const data = await upstream.json().catch(() => null) as { thread_id?: string } | null;
+  if (!upstream.ok || !data?.thread_id)
+    return reply.code(502).send({ error: "création de conversation indisponible" });
+  await pool.query(
+    "INSERT INTO assistant_threads (thread_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
+    [data.thread_id, req.user!.id],
+  );
+  return data;
 });
 
 // Qui suis-je ? (le front l'appelle au chargement pour connaître l'état de session)
@@ -851,28 +916,47 @@ app.post("/api/query-readonly", { preHandler: requireAuth }, async (req, reply) 
   }
 });
 
-// Recherche sémantique dans la base de connaissances (SOPs, causes de défauts,
-// incidents). pgvector, top 5 par similarité cosinus.
+// Recherche hybride : dense (sens) + plein texte (codes, tags et noms machine),
+// fusionnés par reciprocal-rank fusion. Les sources retournées restent visibles
+// pour permettre au modèle de fonder sa réponse sur une procédure identifiable.
 app.post("/api/knowledge/search", { preHandler: requireAuth }, async (req, reply) => {
   const body = req.body as { query?: string };
   const query = String(body.query ?? "").trim();
   if (!query) return reply.code(400).send({ error: "query requis" });
   const vec = await embed(query);
   const { rows } = await pool.query(
-    `SELECT category, title, body, 1 - (embedding <=> $1::vector) AS score
-     FROM knowledge WHERE embedding IS NOT NULL
-     ORDER BY embedding <=> $1::vector LIMIT 5`,
-    [`[${vec.join(",")}]`],
+    `WITH q AS (
+       SELECT $1::vector AS embedding, websearch_to_tsquery('french', $2) AS terms
+     ), dense AS (
+       SELECT k.id, row_number() OVER (ORDER BY k.embedding <=> q.embedding) AS rank
+       FROM knowledge k CROSS JOIN q WHERE k.embedding IS NOT NULL LIMIT 20
+     ), lexical AS (
+       SELECT k.id, row_number() OVER (ORDER BY ts_rank_cd(to_tsvector('french', k.title || ' ' || k.body), q.terms) DESC) AS rank
+       FROM knowledge k CROSS JOIN q
+       WHERE to_tsvector('french', k.title || ' ' || k.body) @@ q.terms LIMIT 20
+     ), fused AS (
+       SELECT COALESCE(d.id, l.id) AS id,
+              COALESCE(1.0 / (60 + d.rank), 0) + COALESCE(1.0 / (60 + l.rank), 0) AS score
+       FROM dense d FULL OUTER JOIN lexical l USING (id)
+     )
+     SELECT k.id, k.category, k.title, k.body, f.score
+     FROM fused f JOIN knowledge k ON k.id = f.id
+     ORDER BY f.score DESC LIMIT 5`,
+    [`[${vec.join(",")}]`, query],
   );
   if (rows.length === 0) return { message: "Aucun document trouvé dans la base de connaissances." };
-  return rows.map((r) => ({ category: r.category, title: r.title, body: r.body, score: Number(r.score).toFixed(3) }));
+  return rows.map((r) => ({
+    source: { id: r.id, category: r.category, title: r.title },
+    body: r.body,
+    score: Number(r.score).toFixed(4),
+  }));
 });
 
 // Upsert d'un chunk dans la base de connaissances. L'embedding est calculé côté
-// appelant (ai-service, via Ollama) — cette route ne fait que stocker, elle
-// n'a pas besoin de connaître le modèle d'embedding utilisé. Idempotent
-// (ON CONFLICT category+title, comme seed-knowledge-pdf.ts).
-app.post("/api/knowledge/ingest", { preHandler: requireAuth }, async (req, reply) => {
+// appelant (ai-service/ingest.py, via Ollama) — cette route ne fait que stocker,
+// elle n'a pas besoin de connaître le modèle d'embedding utilisé. Idempotent
+// (ON CONFLICT category+title, qui encode le numéro de chunk).
+app.post("/api/knowledge/ingest", { preHandler: requireAssistantService }, async (req, reply) => {
   const body = req.body as { category?: string; title?: string; body?: string; embedding?: number[] };
   const category = String(body.category ?? "").trim();
   const title = String(body.title ?? "").trim();
@@ -897,9 +981,10 @@ app.post("/api/knowledge/ingest", { preHandler: requireAuth }, async (req, reply
 // Liste groupée des documents pour la page Admin « Base de connaissances »
 // (étape 7). Regex plutôt qu'une colonne dédiée : pas de migration de schéma
 // nécessaire — la convention "<fichier> — chunk i/N" posée par
-// ai-service/ingest.py suffit à regrouper les chunks d'un même PDF ; les
-// entrées manuelles (seed-knowledge.ts, sans ce suffixe) s'affichent comme
-// leur propre document à 1 "chunk".
+// ai-service/ingest.py suffit à regrouper les chunks d'un même PDF. Toute la
+// connaissance vient désormais de PDF (plus d'entrées manuelles à la main,
+// cf. ai-service/generate_manual_pdf.py) ; le fallback "pas de suffixe = 1
+// chunk" reste défensif pour d'anciennes lignes non ré-ingérées.
 app.get("/api/knowledge", { preHandler: requireAdmin }, async () => {
   const { rows } = await pool.query(
     `SELECT k.doc_name, k.category, k.chunks, k.updated_at, k.embedded,
@@ -919,7 +1004,7 @@ app.get("/api/knowledge", { preHandler: requireAdmin }, async () => {
 
 // Sert le PDF original (affichage inline dans le navigateur). Seuls les
 // documents uploadés APRÈS l'ajout de knowledge_files ont un fichier stocké —
-// les entrées manuelles (seed-knowledge.ts, jamais un PDF) n'en ont jamais.
+// d'anciennes entrées non ré-ingérées pourraient encore ne pas en avoir.
 app.get("/api/knowledge/:category/:docName/file", { preHandler: requireAdmin }, async (req, reply) => {
   const { category, docName } = req.params as { category: string; docName: string };
   const { rows } = await pool.query(
@@ -1094,6 +1179,119 @@ app.post("/api/command", { preHandler: requireAuth }, async (req, reply) => {
   }
   await audit(req.user!.username, "tag.command", b.tag, { value: b.value });
   return { ok: true, tag: b.tag, value: b.value };
+});
+
+// Opérations métier cataloguées. Le LLM ne reçoit que leurs identifiants ; la
+// gateway résout elle-même le tag et la valeur depuis la configuration réelle.
+// Ainsi, un modèle ne peut jamais transformer une formulation vague en écriture
+// arbitraire sur un PLC.
+app.post("/api/operations/execute", { preHandler: requireAuth }, async (req, reply) => {
+  const b = req.body as { operation_id?: string; line?: string };
+  const operationId = b.operation_id as OperationId;
+  const line = String(b.line ?? "").trim();
+  if (!(operationId in OPERATION_LABELS))
+    return reply.code(400).send({ error: "operation_id non supporté" });
+  if (!line) return reply.code(400).send({ error: "line requis" });
+
+  const { rows: lines } = await pool.query(
+    "SELECT line, label, running_tag, enabled FROM oee_line WHERE line = $1",
+    [line],
+  );
+  const target = lines[0] as { line: string; label: string | null; running_tag: string | null; enabled: boolean } | undefined;
+  if (!target || !target.enabled || !target.running_tag)
+    return reply.code(404).send({ error: "ligne non pilotable ou introuvable" });
+  if (!can(req.user, "write", target.running_tag))
+    return reply.code(403).send({ error: `pas le droit de piloter ${line}` });
+
+  // Un arrêt normal ne coupe jamais un batch encore en cours. L'arrêt d'urgence
+  // relève de la chaîne de sécurité PLC/HMI, volontairement hors du chat.
+  if (operationId === "stop_line") {
+    const active = await pool.query(
+      "SELECT id FROM batches WHERE line = $1 AND ended_at IS NULL LIMIT 1",
+      [line],
+    );
+    if (active.rows.length)
+      return reply.code(409).send({
+        error: "arrêt normal refusé : un batch est encore en cours sur cette ligne",
+        batch_id: active.rows[0].id,
+      });
+  }
+
+  const current = await pool.query(
+    "SELECT value FROM mesures WHERE tag = $1 ORDER BY ts DESC LIMIT 1",
+    [target.running_tag],
+  );
+  const desiredValue = operationId === "start_line" ? 1 : 0;
+  const alreadyInDesiredState = current.rows.length > 0 && Number(current.rows[0].value) === desiredValue;
+  if (!alreadyInDesiredState) {
+    try {
+      await publishCommand(target.running_tag, desiredValue, `operation:${operationId}:user:${req.user!.username}`);
+    } catch (err) {
+      app.log.error(`publication opération ${operationId} échouée: ${(err as Error).message}`);
+      return reply.code(502).send({ error: "broker indisponible" });
+    }
+  }
+  await audit(req.user!.username, "operation.execute", line, {
+    operation_id: operationId,
+    command_tag: target.running_tag,
+    value: desiredValue,
+    already_in_desired_state: alreadyInDesiredState,
+  });
+  return {
+    ok: true,
+    operation_id: operationId,
+    line,
+    line_label: target.label,
+    summary: `${OPERATION_LABELS[operationId]} « ${target.label ?? line} »`,
+    already_in_desired_state: alreadyInDesiredState,
+  };
+});
+
+// Ajustement de consigne (temp_cible), UN AJUSTEMENT pas un changement de
+// recette : la gateway borne l'écart à ±2×temp_tol (tag publié par le
+// simulateur, cf. simulator/factory/brain.py::Vessel.tags) autour de la
+// consigne actuelle. Au-delà, c'est une décision produit qui n'a rien à faire
+// dans un chat confirmé par un opérateur.
+app.post("/api/operations/setpoint", { preHandler: requireAuth }, async (req, reply) => {
+  const b = req.body as { line?: string; vessel?: string; value?: number };
+  const line = String(b.line ?? "").trim();
+  const vessel = b.vessel as Vessel;
+  const value = Number(b.value);
+  if (!VESSELS.includes(vessel)) return reply.code(400).send({ error: "cuve non supportée" });
+  if (!line || Number.isNaN(value)) return reply.code(400).send({ error: "line et value (nombre) requis" });
+
+  const tag = `${line}.${vessel}.temp_cible`;
+  const tolTag = `${line}.${vessel}.temp_tol`;
+  if (!can(req.user, "write", tag)) return reply.code(403).send({ error: `pas le droit d'écrire sur ${tag}` });
+
+  const [{ rows: cur }, { rows: tolRows }] = await Promise.all([
+    pool.query("SELECT value FROM mesures WHERE tag = $1 ORDER BY ts DESC LIMIT 1", [tag]),
+    pool.query("SELECT value FROM mesures WHERE tag = $1 ORDER BY ts DESC LIMIT 1", [tolTag]),
+  ]);
+  if (!cur.length) return reply.code(404).send({ error: "cuve introuvable ou jamais mesurée" });
+  const current = Number(cur[0].value);
+  const tolerance = tolRows.length ? Number(tolRows[0].value) : 5;
+  const maxDelta = tolerance * 2;
+  if (Math.abs(value - current) > maxDelta) {
+    return reply.code(409).send({
+      error: `écart trop important (max ±${maxDelta}°C autour de ${current}°C) — changement de recette hors périmètre du chat`,
+    });
+  }
+
+  try {
+    await publishCommand(tag, value, `operation:adjust_setpoint:user:${req.user!.username}`);
+  } catch (err) {
+    app.log.error(`publication consigne échouée: ${(err as Error).message}`);
+    return reply.code(502).send({ error: "broker indisponible" });
+  }
+  await audit(req.user!.username, "operation.setpoint", tag, { value, previous: current });
+  return {
+    ok: true,
+    tag,
+    value,
+    previous: current,
+    summary: `consigne ${vessel} de « ${line} » : ${current}°C → ${value}°C`,
+  };
 });
 
 // Liste des tags configurés (avec métadonnées).
@@ -1855,7 +2053,7 @@ app.register(httpProxy, {
   upstream: AI_SERVICE_URL,
   prefix: "/api/langgraph",
   rewritePrefix: "",
-  preHandler: requireAuth,
+  preHandler: requireAssistantProxyAccess,
 });
 
 app.register(async (f) => {
@@ -1994,6 +2192,57 @@ async function seedAdmin() {
 }
 
 /**
+ * Crée le compte technique ai-service sans jamais lui attribuer le rôle admin.
+ * Cette migration est aussi exécutée au démarrage afin de protéger les volumes
+ * Timescale déjà initialisés avant l'ajout du rôle dans 04-auth.sql.
+ */
+async function seedAssistantService() {
+  const password = process.env.AI_SERVICE_PASSWORD;
+  if (!password) {
+    app.log.warn("[auth] AI_SERVICE_PASSWORD absent : ai-service ne pourra pas se connecter.");
+    return;
+  }
+  await pool.query(
+    "INSERT INTO roles (name, description) VALUES ('assistant_service', 'Compte technique IA : lecture seule via la gateway') ON CONFLICT (name) DO NOTHING",
+  );
+  await pool.query(
+    "INSERT INTO grants (role, scope, action) VALUES ('assistant_service', '*', 'read') ON CONFLICT DO NOTHING",
+  );
+  const existing = await pool.query("SELECT id FROM users WHERE username = 'assistant-service'");
+  if (existing.rows.length === 0) {
+    const hash = await hashPassword(password);
+    const created = await pool.query(
+      "INSERT INTO users (username, password_hash, display_name) VALUES ('assistant-service',$1,'Service assistant IA') RETURNING id",
+      [hash],
+    );
+    app.log.info("[auth] compte technique assistant-service créé (lecture seule).");
+  }
+  // Répare aussi une installation où le compte aurait été créé manuellement
+  // avant l'introduction du rôle dédié.
+  await pool.query(
+    `INSERT INTO user_roles (user_id, role)
+     SELECT id, 'assistant_service' FROM users WHERE username = 'assistant-service'
+     ON CONFLICT DO NOTHING`,
+  );
+}
+
+/** Migration légère, exécutée aussi sur les volumes déjà initialisés. */
+async function ensureAssistantThreadsTable() {
+  await pool.query(`CREATE TABLE IF NOT EXISTS assistant_threads (
+    thread_id TEXT PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`);
+}
+
+/** Ajoute l'index lexical aux bases déjà créées avant le RAG hybride. */
+async function ensureKnowledgeSearchIndex() {
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS knowledge_fts_idx ON knowledge USING gin (to_tsvector('french', title || ' ' || body))",
+  );
+}
+
+/**
  * Seed de règles d'alarme de démo (idempotent : seulement si la table est vide).
  * Calées sur les tags du simulateur brasserie pour que des alarmes se déclenchent
  * au fil des incidents du scénario. Désactivable via SEED_DEMO_ALARMS=0.
@@ -2024,6 +2273,9 @@ async function seedDemoAlarms() {
 // --- Démarrage -------------------------------------------------------------
 async function main() {
   await seedAdmin();
+  await seedAssistantService();
+  await ensureAssistantThreadsTable();
+  await ensureKnowledgeSearchIndex();
   await seedDemoRoles();
   await refreshTagCache();
   setInterval(() => refreshTagCache().catch(() => {}), 10_000); // garde le cache frais

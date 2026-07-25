@@ -69,7 +69,7 @@ RisingWave/Timescale), on ajoute deux tools — et **le LLM découvre le schéma
   read-only), puis tools d'**action encadrée** (write via gateway + confirmation humaine).
 
 **État Part B — FAIT & validé (sûr même sur petit modèle)** : motif **propose → confirme →
-exécute**. Les write tools (`set_command`, `ack_alarm`) sont **interceptés** par la boucle (jamais
+exécute**. Les write tools (`request_operation`, `ack_alarm`) sont **interceptés** par la boucle (jamais
 exécutés par le modèle) → l'API renvoie une `pending_action`. Contrat front :
 - `POST /api/assistant/chat` → soit `{ answer }`, soit `{ pendingAction: { id, tool, args, summary } }`.
 - si `pendingAction` → le front montre une **carte de confirmation** (« `summary` ? [Confirmer] [Annuler] »).

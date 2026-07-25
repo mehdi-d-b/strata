@@ -19,6 +19,11 @@ CREATE TABLE IF NOT EXISTS knowledge (
 CREATE INDEX IF NOT EXISTS knowledge_embedding_idx
     ON knowledge USING hnsw (embedding vector_cosine_ops);
 
+-- Les références machine, codes défaut et noms de tags sont mieux retrouvés par
+-- recherche lexicale que par seul embedding. Cet index complète HNSW.
+CREATE INDEX IF NOT EXISTS knowledge_fts_idx
+    ON knowledge USING gin (to_tsvector('french', title || ' ' || body));
+
 ALTER TABLE knowledge
     ADD CONSTRAINT IF NOT EXISTS knowledge_category_title_key UNIQUE (category, title);
 

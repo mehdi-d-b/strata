@@ -11,6 +11,10 @@ BATCH_ID_RE = re.compile(r"\b[a-z]+-[0-9a-f-]{6,}\b", re.I)
 # la mention seule ne suffit pas à distinguer un diagnostic de batch d'un état
 # machine — on exige donc en plus un mot-clé de verdict qualité.
 QC_WORDS = re.compile(r"\b(hors spec|conforme|contamin\w*|d[ée]faut|rebut|qualit[ée]|rat[ée]\w*|nok)\b", re.I)
+LINE_BLOCKED_WORDS = re.compile(
+    r"\b(bloqu\w*|bouge plus|ne (?:bouge|d[ée]marre|avance) pas|panne|bourrage|attente|arr[êe]t inattendu)\b",
+    re.I,
+)
 
 
 def detect_batch_diagnostic(text: str, recipes: list[str]) -> str | None:
@@ -21,6 +25,21 @@ def detect_batch_diagnostic(text: str, recipes: list[str]) -> str | None:
     if not id_match and not BATCH_WORDS.search(text) and not (has_recipe and QC_WORDS.search(text)):
         return None
     return id_match.group(0) if id_match else text
+
+
+def detect_line_blocked(text: str, recipes: list[str]) -> str | None:
+    """Retourne le préfixe de ligne si l'opérateur décrit explicitement un blocage.
+
+    On exige une ligne connue : « ma ligne est bloquée » reste ambigu et doit
+    conduire l'agent à demander laquelle, plutôt que d'enquêter au hasard.
+    """
+    if not LINE_BLOCKED_WORDS.search(text):
+        return None
+    lowered = text.lower()
+    matches = [recipe for recipe in recipes if recipe.lower() in lowered]
+    if len(matches) != 1:
+        return None
+    return f"brasserie.{matches[0]}"
 
 
 def build_knowledge_query(ctx: dict) -> str | None:

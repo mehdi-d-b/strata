@@ -21,7 +21,7 @@ JAMAIS lui-même — il s'authentifie contre la gateway comme un compte de
 service (cf. gateway.py), pas comme l'opérateur qui discute, et ne peut donc
 pas re-vérifier le RBAC avec la VRAIE identité. C'est le NAVIGATEUR (qui a la
 vraie session) qui exécute réellement, via les routes gateway déjà
-RBAC-checkées (`POST /api/command`, `POST /api/alarms/:id/ack`,
+RBAC-checkées (`POST /api/operations/execute`, `POST /api/alarms/:id/ack`,
 cf. web/src/AssistantView.tsx::InterruptCard), puis reprend le graphe
 (`sendCommand({resume: {confirmed, ok, error?}})`) avec le résultat réel.
 """
@@ -39,8 +39,8 @@ from langgraph.types import interrupt
 
 import gateway
 from context import build_factory_context
-from routing import build_knowledge_query, detect_batch_diagnostic
-from tools import ALL_TOOLS, WRITE_TOOLS, get_batch_context, search_knowledge
+from routing import build_knowledge_query, detect_batch_diagnostic, detect_line_blocked
+from tools import ALL_TOOLS, WRITE_TOOLS, get_batch_context, get_line_status, search_knowledge
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 # AI_SERVICE_MODEL, pas ASSISTANT_MODEL (réservée à gateway/src/assistant.ts) :
@@ -73,14 +73,21 @@ SYSTEM_PROMPT_STATIC = (
     "Pour investiguer l'état d'une machine ou diagnostiquer un problème opérationnel, enchaîne librement "
     "les tools : list_alarms (alarmes actives/non acquittées), get_history (tendance d'un tag), "
     "describe_schema + query_readonly (SQL libre en lecture seule). "
-    "Pour AGIR (écrire une consigne, acquitter une alarme), utilise set_command / ack_alarm UNIQUEMENT "
-    "si l'opérateur demande explicitement d'effectuer une action — jamais pour répondre à une question "
-    "sur la procédure à suivre. Ces actions sont des PROPOSITIONS soumises à confirmation humaine. "
-    "Ne DEVINE JAMAIS un tag ni une séquence pour set_command sur une action de pilotage "
-    "(démarrer/arrêter une ligne ou une machine) : appelle search_knowledge AVANT de proposer l'action "
-    "(ex. 'arrêter la ligne blonde') — les procédures (SOP) y décrivent le bon tag, l'ordre des étapes "
-    "et les précautions (ex. ne pas couper un batch en cours). Une question ('comment') ou une demande "
-    "d'action ('arrête X') appellent toutes les deux search_knowledge en premier. "
+    "Pour AGIR (démarrer/arrêter normalement une ligne, ajuster une consigne de température, acquitter une "
+    "alarme), utilise request_operation / adjust_setpoint / ack_alarm UNIQUEMENT si l'opérateur demande "
+    "explicitement d'effectuer une action — jamais pour répondre à une question sur la procédure à suivre. "
+    "Ces actions sont des PROPOSITIONS soumises à confirmation humaine. "
+    "Ne DEVINE JAMAIS un tag, une valeur limite ou une séquence PLC. Pour piloter une ligne, utilise seulement "
+    "request_operation avec l'identifiant d'opération métier et le préfixe de ligne. Pour ajuster une consigne, "
+    "utilise adjust_setpoint avec la cuve (empateur/ebullition/fermenteur) et la nouvelle valeur — propose un "
+    "ajustement raisonnable proche de la valeur actuelle, jamais un changement de recette : la gateway refuse "
+    "un écart trop important. Pour une demande d'arrêt ou de démarrage, appelle search_knowledge AVANT de "
+    "proposer l'action (ex. 'arrêter la ligne blonde') : les SOP expliquent les précautions ; la gateway "
+    "vérifiera elle-même les préconditions, dont un batch en cours. "
+    "Si le dossier d'une ligne bloquée est déjà présent dans les messages, commence par ses FAITS : "
+    "une machine en `attente` n'est pas une panne et ne doit pas être redémarrée. Une alarme ou une machine "
+    "arrêtée justifie une procédure terrain, mais ne dis jamais à l'opérateur de contourner un interlock ou une "
+    "sécurité. Indique les vérifications physiques de la SOP, puis ne propose une opération qu'à sa demande explicite. "
     "Si l'opérateur demande PLUSIEURS actions similaires en une phrase (ex. 'acquitte ces deux alarmes'), "
     "propose TOUS les appels d'outils d'écriture nécessaires en UNE SEULE réponse (plusieurs tool calls), "
     "pas un seul à la fois — chacun sera confirmé séparément par l'opérateur."
@@ -106,8 +113,16 @@ def _llm():
 async def _summarize_write(tool: str, args: dict) -> str:
     """Résumé humain d'une action d'écriture proposée — portage de
     assistant.ts::summarize."""
-    if tool == "set_command":
-        return f"écrire la consigne {args.get('value')} sur le tag « {args.get('tag')} »"
+    if tool == "request_operation":
+        labels = {"start_line": "démarrer normalement", "stop_line": "arrêter normalement"}
+        operation = str(args.get("operation_id", ""))
+        line = str(args.get("line", ""))
+        return f"{labels.get(operation, operation or 'opération inconnue')} la ligne « {line} »"
+    if tool == "adjust_setpoint":
+        line = str(args.get("line", ""))
+        vessel = str(args.get("vessel", ""))
+        value = args.get("value")
+        return f"ajuster la consigne « {vessel} » de la ligne « {line} » à {value}°C"
     if tool == "ack_alarm":
         alarm_id = str(args.get("alarm_id", ""))
         try:
@@ -134,8 +149,10 @@ async def _init_node(state: AgentState) -> dict:
 def _route_entry(state: AgentState) -> str:
     last_user = next((m for m in reversed(state["messages"]) if m.type == "human"), None)
     text = last_user.content if last_user else ""
-    batch_ref = detect_batch_diagnostic(text, state.get("recipes", []))
-    return "forced_batch" if batch_ref else "agent"
+    recipes = state.get("recipes", [])
+    if detect_batch_diagnostic(text, recipes):
+        return "forced_batch"
+    return "forced_line_blocked" if detect_line_blocked(text, recipes) else "agent"
 
 
 async def _forced_batch_node(state: AgentState) -> dict:
@@ -163,6 +180,31 @@ async def _forced_batch_node(state: AgentState) -> dict:
         new_messages.append(ToolMessage(content=result2, tool_call_id=call_id2, name="search_knowledge"))
 
     return {"messages": new_messages, "steps": len(new_messages) // 2}
+
+
+async def _forced_line_blocked_node(state: AgentState) -> dict:
+    """Playbook « ligne bloquée » : les faits et la SOP sont toujours récupérés
+    avant la réponse. Le modèle conserve le rôle d'explication, pas d'enquêteur
+    qui choisirait arbitrairement quels tags consulter."""
+    last_user = next((m for m in reversed(state["messages"]) if m.type == "human"), None)
+    text = last_user.content if last_user else ""
+    line = detect_line_blocked(text, state.get("recipes", []))
+    if not line:
+        return {}
+
+    status_id = "forced_line_status"
+    status = await get_line_status.ainvoke({"line": line})
+    knowledge_id = "forced_line_procedure"
+    knowledge = await search_knowledge.ainvoke({"query": f"ligne bloquée {line} panne attente embouteilleuse"})
+    return {
+        "messages": [
+            AIMessage(content="", tool_calls=[{"name": "get_line_status", "args": {"line": line}, "id": status_id}]),
+            ToolMessage(content=status, tool_call_id=status_id, name="get_line_status"),
+            AIMessage(content="", tool_calls=[{"name": "search_knowledge", "args": {"query": f"ligne bloquée {line} panne attente embouteilleuse"}, "id": knowledge_id}]),
+            ToolMessage(content=knowledge, tool_call_id=knowledge_id, name="search_knowledge"),
+        ],
+        "steps": 2,
+    }
 
 
 async def _agent_node(state: AgentState) -> dict:
@@ -244,14 +286,18 @@ def build_graph(checkpointer=None):
     g = StateGraph(AgentState)
     g.add_node("init", _init_node)
     g.add_node("forced_batch", _forced_batch_node)
+    g.add_node("forced_line_blocked", _forced_line_blocked_node)
     g.add_node("agent", _agent_node)
     g.add_node("tools", ToolNode(READ_TOOLS))
     g.add_node("write_intercept", _write_intercept_node)
     g.add_node("max_steps", _max_steps_node)
 
     g.set_entry_point("init")
-    g.add_conditional_edges("init", _route_entry, {"forced_batch": "forced_batch", "agent": "agent"})
+    g.add_conditional_edges("init", _route_entry, {
+        "forced_batch": "forced_batch", "forced_line_blocked": "forced_line_blocked", "agent": "agent",
+    })
     g.add_edge("forced_batch", "agent")
+    g.add_edge("forced_line_blocked", "agent")
     g.add_conditional_edges("agent", _route_after_agent, {
         "tools": "tools", "write_intercept": "write_intercept", "max_steps": "max_steps", "end": END,
     })
