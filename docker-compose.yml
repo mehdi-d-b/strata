@@ -212,9 +212,8 @@ services:
       KAFKAJS_NO_PARTITIONER_WARNING: "1"
       # API REST de Kafka Connect (profil plc4x) pour déployer les connecteurs générés.
       KAFKA_CONNECT_URL: "http://kafka-connect:8083"
-      # Assistant IA local (profil `ai`) : runtime Ollama + modèle. Absent = chat désactivé.
+      # Ollama (profil `ai`) : embeddings des requêtes RAG (/api/knowledge/search).
       OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
-      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-qwen2.5:7b}
       # Proxy vers le serveur LangGraph natif d'ai-service (front assistant-ui).
       AI_SERVICE_URL: "http://ai-service:8000"
     ports:
@@ -248,8 +247,9 @@ services:
   # --- Assistant IA local (profil optionnel `ai`) -------------------------
   # Runtime LLM open-source, 100% local (aucun cloud). Expose une API HTTP
   # (compatible OpenAI sur /v1) que la gateway appelle. Le modèle se charge via
-  # `docker compose exec ollama ollama pull qwen2.5:3b`. GPU auto-détecté si dispo
-  # (souvent CPU en pratique). Démarre avec : docker compose --profile ai up -d
+  # `make up-ai` (modèle de chat + modèle d'embedding). GPU auto-détecté si dispo
+  # (souvent CPU en pratique) ; sur Mac, préférer Ollama natif (GPU Metal) via
+  # OLLAMA_URL=http://host.docker.internal:11434 dans .env. Démarre avec : docker compose --profile ai up -d
   ollama:
     image: ollama/ollama:latest
     container_name: strata-ollama
@@ -282,9 +282,7 @@ services:
       # dédiée. En production, AI_SERVICE_PASSWORD doit être un secret distinct.
       AI_SERVICE_PASSWORD: ${AI_SERVICE_PASSWORD:-change-me-en-prod-assistant}
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
-      # Var dédiée (pas ASSISTANT_MODEL, réservée à la gateway) : sinon
-      # ASSISTANT_MODEL=qwen2.5:14b dans .env écraserait silencieusement ce
-      # défaut. qwen3.5:9b (GGUF Q4_K_M) choisi le 2026-10-27 sur l'éval
+      # qwen3.5:9b (GGUF Q4_K_M) choisi le 2026-10-27 sur l'éval
       # ai-service/evals/tool_selection.py (21 questions × 5 essais, prompt de
       # prod) : pass^5 0.905 contre 0.857 pour qwen2.5:7b (qui sautait la SOP
       # avant d'arrêter/démarrer une ligne), ~1 s de plus par appel. La variante

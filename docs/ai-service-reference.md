@@ -29,7 +29,7 @@ n'est pas un détail, c'est LA raison d'être du découpage en microservice.
   un outil de debug ponctuel.
 - **LangChain** (`langchain-ollama`, `langchain-core`) — wrapper autour
   d'Ollama pour le tool-calling structuré.
-- **Ollama** (local, 100% offline) — deux modèles : `qwen2.5:7b` pour le chat/
+- **Ollama** (local, 100% offline) — deux modèles : `qwen3.5:9b` pour le chat/
   raisonnement, `embeddinggemma` pour les embeddings. Plus un reranker
   cross-encoder (`BAAI/bge-reranker-v2-m3`, via `transformers`, §6.1).
 - **Docling** — extraction + découpage structuré des PDF ingérés (§6.3).

@@ -43,7 +43,6 @@ from routing import build_knowledge_query, detect_batch_diagnostic, detect_line_
 from tools import ALL_TOOLS, WRITE_TOOLS, get_batch_context, get_line_status, search_knowledge
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-# AI_SERVICE_MODEL, pas ASSISTANT_MODEL (réservée à gateway/src/assistant.ts) :
 # qwen3.5:9b, choisi sur l'éval evals/tool_selection.py (cf. docker-compose.yml).
 AI_SERVICE_MODEL = os.environ.get("AI_SERVICE_MODEL", "qwen3.5:9b")
 AI_SERVICE_THINK = os.environ.get("AI_SERVICE_THINK", "false").lower() == "true"
