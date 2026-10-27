@@ -125,6 +125,47 @@ function WriteActionResult({ result, isError }: ToolCallMessagePartProps) {
   );
 }
 
+type KnowledgeHit = { source: { id: number; category: string; title: string }; body: string; score: string };
+
+/**
+ * Passages retournés par search_knowledge, affichés depuis le résultat de
+ * l'outil (pas depuis le texte du modèle) : l'opérateur voit ce qui a été
+ * réellement retrouvé, même si le modèle oublie de citer ou cite mal. Ce sont
+ * les documents CONSULTÉS, pas forcément ceux utilisés dans la réponse.
+ * Titre stocké : "<document> — chunk i/N" (ai-service/ingest.py) ; la 1re
+ * ligne du chunk est son titre de section (Docling contextualize).
+ */
+function KnowledgeSources({ result }: ToolCallMessagePartProps) {
+  if (result == null) return null;
+  let hits: unknown;
+  try {
+    hits = typeof result === "string" ? JSON.parse(result) : result;
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(hits) || hits.length === 0) return null;
+  return (
+    <details className="my-1 rounded-md border border-border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+      <summary className="cursor-pointer select-none font-medium">Documents consultés ({hits.length})</summary>
+      <ul className="mt-2 flex flex-col gap-2">
+        {(hits as KnowledgeHit[]).map((h) => {
+          const [doc, chunk] = h.source.title.split(" — ");
+          const [section, ...rest] = h.body.split("\n");
+          return (
+            <li key={h.source.id}>
+              <div className="text-foreground">
+                <span className="font-medium">{section}</span>
+                <span> · {doc}{chunk ? ` (${chunk.replace("chunk", "passage")})` : ""}</span>
+              </div>
+              <p className="line-clamp-3 whitespace-pre-line">{rest.join("\n")}</p>
+            </li>
+          );
+        })}
+      </ul>
+    </details>
+  );
+}
+
 function AssistantMessage() {
   return (
     <MessagePrimitive.Root className="mx-auto flex w-full max-w-2xl justify-start py-2">
@@ -137,6 +178,7 @@ function AssistantMessage() {
                 request_operation: WriteActionResult,
                 adjust_setpoint: WriteActionResult,
                 ack_alarm: WriteActionResult,
+                search_knowledge: KnowledgeSources,
               },
             },
           }}
