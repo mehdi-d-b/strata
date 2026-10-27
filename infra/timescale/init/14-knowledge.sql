@@ -1,7 +1,7 @@
 -- Base de connaissances vectorielle (RAG) ----------------------------------------
 -- Prérequis : pgvector (CREATE EXTENSION vector).
--- Chaque document est découpé en chunks ; chaque chunk est embeddi via
--- nomic-embed-text (768 dimensions) par le gateway avant insertion.
+-- Chaque document est découpé en chunks ; chaque chunk est embeddé via
+-- embeddinggemma (768 dimensions) par ai-service avant insertion.
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS knowledge (
     category    TEXT NOT NULL,          -- ex: 'sop', 'incident', 'machine', 'recette'
     title       TEXT NOT NULL,
     body        TEXT NOT NULL,          -- texte brut du chunk
-    embedding   vector(768),            -- nomic-embed-text produit 768 dims
+    embedding   vector(768),            -- embeddinggemma produit 768 dims
+    embed_model TEXT,                   -- modèle ayant produit `embedding` (ré-embedding si ≠ EMBED_MODEL)
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );

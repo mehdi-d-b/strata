@@ -291,6 +291,10 @@ services:
       # qwen3.5:9b-mlx (NVFP4) n'était pas plus rapide sur le M4 16 Go et prend
       # 8,4 Go au lieu de 5,6. Mode réflexion coupé (AI_SERVICE_THINK, graph.py).
       AI_SERVICE_MODEL: ${AI_SERVICE_MODEL:-qwen3.5:9b}
+    # Cache Hugging Face (reranker ~2,3 Go, modèle de mise en page Docling) :
+    # téléchargé une fois, survit aux rebuilds de l'image.
+    volumes:
+      - hf-cache:/root/.cache/huggingface
     # Pas de port hôte : le serveur LangGraph ne doit être joignable que par la
     # gateway, qui est l'unique frontière d'authentification de l'application.
     restart: unless-stopped
@@ -300,3 +304,4 @@ volumes:
   timescale-data:
   risingwave-data:
   ollama-data:
+  hf-cache:

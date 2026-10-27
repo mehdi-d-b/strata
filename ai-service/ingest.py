@@ -39,7 +39,7 @@ from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
 
 import gateway
-from embeddings import embed
+from embeddings import EMBED_MODEL, embed_document
 
 PDF_DIR = pathlib.Path(__file__).parent / "knowledge-pdfs"
 
@@ -70,12 +70,13 @@ async def ingest_pdf_bytes(filename: str, data: bytes) -> int:
     base = pathlib.Path(filename).stem
     for i, chunk in enumerate(chunks):
         title = f"{base} — chunk {i + 1}/{len(chunks)}"
-        vec = await embed(chunk)
+        vec = await embed_document(chunk)
         resp = await gateway.post("/api/knowledge/ingest", {
             "category": "manuel",
             "title": title,
             "body": chunk,
             "embedding": vec,
+            "embed_model": EMBED_MODEL,
         })
         resp.raise_for_status()
     return len(chunks)

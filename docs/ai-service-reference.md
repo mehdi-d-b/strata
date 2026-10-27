@@ -30,7 +30,8 @@ n'est pas un détail, c'est LA raison d'être du découpage en microservice.
 - **LangChain** (`langchain-ollama`, `langchain-core`) — wrapper autour
   d'Ollama pour le tool-calling structuré.
 - **Ollama** (local, 100% offline) — deux modèles : `qwen2.5:7b` pour le chat/
-  raisonnement, `nomic-embed-text` pour les embeddings.
+  raisonnement, `embeddinggemma` pour les embeddings. Plus un reranker
+  cross-encoder (`BAAI/bge-reranker-v2-m3`, via `transformers`, §6.1).
 - **Docling** — extraction + découpage structuré des PDF ingérés (§6.3).
 
 ## 2. Le graphe (`graph.py`)
@@ -326,16 +327,34 @@ modèle pour décider seul de la séquence d'investigation sur un cas à enjeu.
 
 ### 6.1 Embedding
 
-`nomic-embed-text` via Ollama, **768 dimensions**. Deux points d'appel
-identiques (même modèle, sinon les vecteurs ne seraient pas comparables) :
-- `ai-service/embeddings.py::embed()` — à l'ingestion (Docling → chunks →
-  embed → upsert).
-- `gateway/src/embeddings.ts::embed()` — à la requête (`search_knowledge`).
+`embeddinggemma` (multilingue, 300M) via Ollama, **768 dimensions**. Même
+modèle aux deux bouts, sinon les vecteurs ne seraient pas comparables, avec le
+**préfixe de tâche** attendu par le modèle (`task: search result | query: `
+pour une question, `title: none | text: ` pour un document) :
+- `ai-service/embeddings.py::embed_document()` — à l'ingestion (Docling →
+  chunks → embed → upsert, avec `embed_model`).
+- `gateway/src/embeddings.ts::embedQuery()` — à la requête (`search_knowledge`).
 
-Pas de reranker. Ce qui pourrait y ressembler (la fusion ci-dessous) n'en est
-pas un : un reranker (cross-encoder) rescore chaque paire requête-document
-individuellement après une première récupération ; on n'a que la fusion de
-deux classements indépendants.
+Choisi le 2026-10-27 sur une éval de recherche (dense seule) sur le corpus
+réel : 27 questions reformulées façon opérateur, chunks pertinents connus.
+Bon chunk dans le top 5 : `nomic-embed-text` (l'ancien modèle, entraîné sur de
+l'anglais, sans préfixes) 74 % ; avec préfixes 85 % ; `bge-m3` 96 % ;
+`qwen3-embedding:0.6b` 96 % ; `embeddinggemma` 100 % (85 % en 1re position).
+
+**Changement de modèle** : la colonne `knowledge.embed_model` trace le modèle
+de chaque vecteur ; au boot, la gateway ré-embedde tout chunk dont
+`embed_model ≠ EMBED_MODEL` (`reembedStaleKnowledge`) à partir de `body`
+(le texte exact embeddé à l'ingestion). Changer de dimension (≠ 768)
+demanderait en plus de migrer la colonne `vector(768)`.
+
+**Reranker** (`ai-service/reranker.py`) : `search_knowledge` demande 10
+candidats à la gateway (`limit`), un cross-encoder (`BAAI/bge-reranker-v2-m3`,
+multilingue) note chaque paire (question, chunk) lue ensemble, on garde les 5
+meilleurs. Sur la même éval : 1re position 85 % → 93 %. Coût ~4 s par
+recherche dans Docker (CPU, pas de GPU Metal), linéaire en nombre de
+candidats — d'où 10 et pas 20 (8 s) ; modèle (~2,3 Go) téléchargé depuis Hugging Face au premier
+appel (volume `hf-cache`). Indisponible → ordre RRF conservé (dégradé, pas en
+panne). Désactivable avec `RERANK_MODEL=` (vide).
 
 ### 6.2 Stockage et recherche : hybride dense + lexical, fusion RRF
 
@@ -352,7 +371,8 @@ par tout le projet. Table `knowledge` (`category`, `title`, `body`,
 score = COALESCE(1.0/(60+rang_dense), 0) + COALESCE(1.0/(60+rang_lexical), 0)
 ```
 via une requête à base de CTE (`dense`, `lexical`, `fused`), `FULL OUTER
-JOIN` sur l'id du chunk, top 5 retournés. Chaque résultat porte une `source`
+JOIN` sur l'id du chunk, top `limit` retournés (5 par défaut, 10 quand
+ai-service reclasse ensuite avec le reranker). Chaque résultat porte une `source`
 identifiable (`id`, `category`, `title`) — permet d'afficher une citation
 côté futur front si besoin, pas exploité pour l'instant.
 
@@ -539,9 +559,6 @@ avant toute écriture — le garde-fou est dans le code, pas dans le prompt.
   pratique, pas corrigé.
 - `pending_action` dans `AgentState` : posé/effacé mais jamais lu nulle
   part (vestige d'une itération antérieure). Inoffensif, pas nettoyé.
-- Pas de reranker (§6.1) — la fusion RRF suffit pour un corpus de cette
-  taille (39 chunks à date) ; à reconsidérer si le corpus grossit
-  significativement.
 - Pas de chunking sémantique/contextual retrieval au-delà de ce que fait
   Docling — pas jugé nécessaire vu la taille et la propreté actuelles du
   corpus (décision déjà actée avant ce chantier, cf. roadmap.md).
@@ -555,7 +572,8 @@ avant toute écriture — le garde-fou est dans le code, pas dans le prompt.
 | `routing.py` | heuristiques de routage forcé (regex) |
 | `context.py` | contexte usine dynamique pour le prompt |
 | `gateway.py` | client HTTP vers la gateway, compte de service |
-| `embeddings.py` | wrapper `nomic-embed-text` via Ollama |
+| `embeddings.py` | embeddings documents (`embeddinggemma`) via Ollama |
+| `reranker.py` | reranker cross-encoder de `search_knowledge` |
 | `ingest.py` | pipeline d'ingestion PDF (Docling) |
 | `generate_manual_pdf.py` | génère `manuel-exploitation-brasserie.pdf` (dev only) |
 | `main.py` | FastAPI minimal : `/health`, `/ingest/pdf` |
