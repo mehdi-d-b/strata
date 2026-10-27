@@ -32,9 +32,17 @@ def _load():
         if _loaded is None:
             from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-            tokenizer = AutoTokenizer.from_pretrained(RERANK_MODEL)
-            model = AutoModelForSequenceClassification.from_pretrained(RERANK_MODEL).eval()
-            _loaded = (tokenizer, model)
+            # Cache local d'abord, sans aucun appel réseau : par défaut,
+            # transformers interroge Hugging Face à chaque chargement pour
+            # vérifier la version (vu dans les logs). Téléchargement seulement
+            # si le modèle n'est pas encore en cache (premier démarrage).
+            try:
+                tokenizer = AutoTokenizer.from_pretrained(RERANK_MODEL, local_files_only=True)
+                model = AutoModelForSequenceClassification.from_pretrained(RERANK_MODEL, local_files_only=True)
+            except OSError:
+                tokenizer = AutoTokenizer.from_pretrained(RERANK_MODEL)
+                model = AutoModelForSequenceClassification.from_pretrained(RERANK_MODEL)
+            _loaded = (tokenizer, model.eval())
     return _loaded
 
 

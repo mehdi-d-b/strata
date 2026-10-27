@@ -1,0 +1,180 @@
+{
+  "summary": {
+    "model": "qwen3.5:9b",
+    "k": 3,
+    "n_runs": 24,
+    "has_sources": 0.042,
+    "all_valid": 0.0,
+    "cites_relevant": 0.0
+  },
+  "runs": [
+    {
+      "question": "La remplisseuse est bloquée en attente, qu'est-ce que je vérifie ?",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": " `list_alarms`) — une alarme CIP ou autre peut bloquer le transfert.  \n\nSi tout semble correct, vérifiez manuellement l'état de la vanne de transfert et assurez-vous qu'aucun cycle CIP n'est en cours."
+    },
+    {
+      "question": "La remplisseuse est bloquée en attente, qu'est-ce que je vérifie ?",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": "Vérifiez manuellement la vanne de transfert** entre le fermenteur et l'embouteilleuse si la température est stable.\n\n4. Si une alarme CIP est active, effectuez le cycle de nettoyage avant de relancer."
+    },
+    {
+      "question": "La remplisseuse est bloquée en attente, qu'est-ce que je vérifie ?",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": "s les bandes nominales de votre recette\n3. Regardez s'il y a des alarmes actives sur la ligne\n\nSi tout est correct, vérifiez manuellement la vanne de transfert entre le fermenteur et l'embouteilleuse."
+    },
+    {
+      "question": "Quelles sont les étapes du nettoyage en place et à quelles températures ?",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": "\n\nLe CIP doit être effectué entre chaque batch et après tout incident de contamination. Un `cip_ok=false` indique que le CIP a été sauté ou interrompu, ce qui est la cause principale de contamination."
+    },
+    {
+      "question": "Quelles sont les étapes du nettoyage en place et à quelles températures ?",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": "rile** - 5 minutes\n\nLe CIP doit être effectué entre chaque batch et après tout incident de contamination. Le tag `cip_ok` passe à 1 uniquement si la séquence complète s'est déroulée sans interruption."
+    },
+    {
+      "question": "Quelles sont les étapes du nettoyage en place et à quelles températures ?",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": "rile** - 5 minutes\n\nLe CIP doit être effectué entre chaque batch et après tout incident de contamination. Le tag `cip_ok` passe à 1 uniquement si la séquence complète s'est déroulée sans interruption."
+    },
+    {
+      "question": "Je dois couper la ligne IPA ce soir, comment faire proprement ?",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": " l'état du dernier batch.\n\nPour exécuter l'action d'arrêt proprement une fois que tout est prêt (batch terminé), utilisez `request_operation` avec `operation_id='stop_line'` et `line='brasserie.ipa'`."
+    },
+    {
+      "question": "Je dois couper la ligne IPA ce soir, comment faire proprement ?",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": "s les conditions réunies, je peux vous proposer d'utiliser `request_operation` avec l'opération 'stop_line' sur la ligne brasserie.ipa - mais cela ne se fera qu'une fois le batch terminé et après CIP."
+    },
+    {
+      "question": "Je dois couper la ligne IPA ce soir, comment faire proprement ?",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": " exécuter physiquement l'opération d'arrêt : utilisez `request_operation` avec operation_id='stop_line' et line='brasserie.ipa', mais seulement après avoir confirmé que tous les batches sont terminés."
+    },
+    {
+      "question": "Le labo a trouvé des bactéries dans le lot, quelle cause probable ?",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": "ué** (`cip_ok = false`), qui permet la contamination par des micro-organismes indésirables. Une seconde cause possible : une température de fermentation trop élevée favorisant les bactéries lactiques."
+    },
+    {
+      "question": "Le labo a trouvé des bactéries dans le lot, quelle cause probable ?",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": "et** (`cip_ok = false`), ce qui permet la contamination par des micro-organismes indésirables. Une seconde possibilité : une température de fermentation trop élevée favorisant les bactéries lactiques."
+    },
+    {
+      "question": "Le labo a trouvé des bactéries dans le lot, quelle cause probable ?",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": "* (`cip_ok = false`), ce qui permet la contamination par des micro-organismes indésirables. Une seconde cause possible : une température de fermentation trop élevée favorisant les bactéries lactiques."
+    },
+    {
+      "question": "Quels contrôles quotidiens sur la machine de remplissage ?",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": "la machine de remplissage (embouteilleuse) sont :\n- Vérifier la pression d'alimentation en CO2.\n- Inspecter les buses de remplissage pour détecter les obstructions.\n- Vérifier le système de capsulage."
+    },
+    {
+      "question": "Quels contrôles quotidiens sur la machine de remplissage ?",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": "embouteilleuse), les contrôles quotidiens sont :\n\n- Vérifier la pression d'alimentation en CO2.\n- Inspecter les buses de remplissage pour détecter les obstructions.\n- Vérifier le système de capsulage."
+    },
+    {
+      "question": "Quels contrôles quotidiens sur la machine de remplissage ?",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": "la machine de remplissage (embouteilleuse) sont :\n- Vérifier la pression d'alimentation en CO2.\n- Inspecter les buses de remplissage pour détecter les obstructions.\n- Vérifier le système de capsulage."
+    },
+    {
+      "question": "La capsuleuse est en bourrage",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": "minale (50 pièces/min).\n\nSi le bourrage persiste ou si une alarme \"panne embouteilleuse\" est active, consultez également l'état des machines via `get_line_status` pour identifier toute autre anomalie."
+    },
+    {
+      "question": "La capsuleuse est en bourrage",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": " min, évaluez si un retour du moût vers une cuve tampon est nécessaire pour éviter sa dégradation. Acquitter l'alarme uniquement après redémarrage réussi et validation que tout fonctionne normalement."
+    },
+    {
+      "question": "La capsuleuse est en bourrage",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": "siste > 20 min, évaluez si un retour du moût vers une cuve tampon est nécessaire pour éviter sa dégradation. Acquitter l'alarme uniquement après confirmation d'un fonctionnement normal post-nettoyage."
+    },
+    {
+      "question": "Un lot ne passe pas le contrôle qualité, que fait-on des bouteilles ?",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": ": enregistrer la décision dans le système (batch ID, action prise, responsable, date).\n\n5. **CORRIGER** : identifier la cause racine et mettre en place une action corrective pour éviter la récurrence."
+    },
+    {
+      "question": "Un lot ne passe pas le contrôle qualité, que fait-on des bouteilles ?",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": "a décision dans le système avec l'ID batch, la prise de décision, responsable et date.\n\n5. **CORRIGER** : identifier la cause racine et mettre en place une action corrective pour éviter la récurrence."
+    },
+    {
+      "question": "Un lot ne passe pas le contrôle qualité, que fait-on des bouteilles ?",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": "si possible.\n\n4. **TRACER** : enregistrer la décision dans le système (id batch, décision prise, responsable, date).\n\n5. **CORRIGER** : identifier et traiter la cause racine pour éviter la récurrence."
+    },
+    {
+      "question": "La bouteille de gaz de la tireuse est presque vide, comment la remplacer ?",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": "lamme).\n\n5. Relancer l'embouteilleuse et contrôler les 20 premières bouteilles produites (vérification du niveau de remplissage et du sertissage) avant de laisser la ligne repartir en cadence normale."
+    },
+    {
+      "question": "La bouteille de gaz de la tireuse est presque vide, comment la remplacer ?",
+      "has_sources": false,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": "age, sertissage) avant cadence normale.\n\nUn fût standard tient entre 3-5 jours en production nominale ; prévoir toujours un fût de rechange sur site - une rupture arrête immédiatement l'embouteillage."
+    },
+    {
+      "question": "La bouteille de gaz de la tireuse est presque vide, comment la remplacer ?",
+      "has_sources": true,
+      "all_valid": false,
+      "cites_relevant": false,
+      "answer_tail": "neuse (pas de flamme).\n5. Relancer l'embouteilleuse et contrôler les 20 premières bouteilles produites avant reprise normale.\n\nSources : procedure-cO2-embouteilleuse#3 ; procedure-cO2-embouteilleuse#1"
+    }
+  ]
+}

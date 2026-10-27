@@ -1,0 +1,158 @@
+[
+ {
+  "id": "manuel-exploitation-brasserie#1",
+  "text": "Manuel d'exploitation  -  Brasserie Strata\nProcédures, défauts, recettes, maintenance et alarmes des 3 lignes de brassage."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#2",
+  "text": "Débloquer une embouteilleuse en attente\nSi l'embouteilleuse est en état 'en_attente' (tag .en_attente = 1), cela signifie que le fermenteur en amont n'a pas encore libéré le moût.\nVérifier : (1) l'état du fermenteur de la même ligne (tag fermenteur.state) ; (2) la température du fermenteur  -  si hors bande nominale, le process attend la stabilisation ; (3) les alarmes actives sur la ligne.\nAction corrective : si la température est stable et correcte, vérifier manuellement la vanne de transfert. Si une alarme CIP est active, effectuer le cycle de nettoyage avant de relancer."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#3",
+  "text": "Procédure CIP (nettoyage en place)\nLe CIP (Clean In Place) doit être effectué entre chaque batch et après tout incident de contamination.\nSéquence standard : rinçage eau froide (5 min) -> soude caustique 2% à 75°C (20 min) -> rinçage eau chaude (5 min) -> acide nitrique 1% à 60°C (10 min) -> rinçage eau stérile (5 min).\nLe tag cip_ok passe à 1 (true) uniquement si la séquence complète s'est déroulée sans interruption. Un cip_ok=false sur un batch indique que le CIP a été sauté ou interrompu  -  cause principale de contamination."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#4",
+  "text": "Réagir à une alarme de fermentation hors température\nSi une alarme 'fermentation trop chaude' ou 'fermentation trop froide' se déclenche :\n1. Vérifier le tag fermenteur.temperature en temps réel (get_history).\n2. Comparer à la bande nominale de la recette : blonde [10-14°C], ipa [18-22°C], jalapeño [17-21°C].\n3. Si déviation > 5°C depuis plus de 30 min : risquer un défaut fermentation_hors_spec sur le batch en cours.\n4. Action : ajuster la consigne de température du fermenteur (opération assistant adjust_setpoint, cuve fermenteur  -  un ajustement  proche  de  la  valeur  actuelle,  pas  un  changement  de  recette).  Si  le  régulateur  ne  répond  pas,  vérifier  le groupe froid de la cuve.\n5. Si le batch a déjà été impacté, créer un rapport de non-conformité."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#5",
+  "text": "Réagir à une alarme de rendement faible\nLe défaut rendement_faible indique que la quantité de bière produite est inférieure à l'attendu pour la recette.\nCauses possibles : (1) déviation thermique à l'empâtage  -  vérifier empateur.temperature vs bande nominale ; (2) durée d'ébullition insuffisante ; (3) pertes par fuite sur la ligne de transfert.\nDiagnostic : appeler get_batch_context pour le batch concerné. Si cuves_hors_bande contient l'empateur, la cause est thermique. Vérifier également les logs d'alarme sur la période du batch."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#6",
+  "text": "Interpréter un arrêt machine (state=0)\nUn tag <machine>.state = 0 indique que la machine est à l'arrêt.\nDistinguer : (1) arrêt planifié (pas de batch en cours, normal) ; (2) arrêt en attente amont (tag .en_attente=1, normal  attendre la cuve précédente) ; (3) arrêt sur défaut (alarme active sur la machine, anormal).\nPour diagnostiquer : vérifier list_alarms pour des alarmes actives sur la ligne. Si aucune alarme et pas de batch actif, l'arrêt est intentionnel. Si alarme présente, suivre la procédure de l'alarme correspondante."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#7",
+  "text": "Démarrer une ligne de production depuis l'arrêt\nSéquence de démarrage d'une ligne (blonde, ipa ou jalapeño) depuis l'arrêt complet :"
+ },
+ {
+  "id": "manuel-exploitation-brasserie#8",
+  "text": "Démarrer une ligne de production depuis l'arrêt\n1. Vérifier qu'aucune alarme active n'est présente sur la ligne (list_alarms).\n2. Vérifier que le CIP a bien été effectué (cip_ok = true sur le dernier batch, ou confirmer manuellement).\n3.  Démarrer  l'empateur  :  mettre  en  chauffe  à  la  consigne  de  la  recette  (empateur.temp_consigne).  Attendre  que  la température soit stable dans la bande nominale.\n4. Une fois l'empâtage démarré, l'ébulliteur prend le relais automatiquement après transfert.\n5. Le fermenteur démarre  en refroidissement dès réception du moût. Vérifier la température de consigne (fermenteur.temp_consigne).\n6. L'embouteilleuse démarre automatiquement quand le fermenteur libère le moût (en_attente passe à 0)."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#9",
+  "text": "Démarrer une ligne de production depuis l'arrêt\nUn batch est automatiquement créé par le système dès que l'empateur est en marche. Pour déclencher réellement le démarrage, utiliser l'opération assistant request_operation (start_line) sur la ligne concernée."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#10",
+  "text": "Arrêter proprement une ligne de production\nSéquence d'arrêt propre d'une ligne :\n1. Ne pas interrompre un batch en cours  -  attendre la fin de l'embouteillage (embouteilleuse.state = 0 naturellement).\n2. Une fois le batch terminé, lancer immédiatement le CIP complet (voir procédure CIP).\n3. Vérifier que tous les tags .state sont à 0 sur la ligne.\n4. Acquitter les alarmes éventuelles restantes.\n5. Consigner l'arrêt dans le registre (heure, raison, état du dernier batch)."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#11",
+  "text": "Arrêter proprement une ligne de production\nEn cas d'arrêt d'urgence en cours de batch : stopper l'empateur et l'ébulliteur en premier, maintenir la réfrigération du fermenteur. Le batch sera probablement non conforme  -  documenter l'incident. Pour un arrêt normal (hors urgence), utiliser  l'opération  assistant  request_operation  (stop_line)    -    elle  refuse  automatiquement  si  un  batch  est  encore  en cours."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#12",
+  "text": "Checklist transfert de poste (passation de shift)\nÀ effectuer 15 minutes avant la fin du poste :"
+ },
+ {
+  "id": "manuel-exploitation-brasserie#13",
+  "text": "Checklist transfert de poste (passation de shift)\n1.  État  des  lignes  :  vérifier  le  state  de  chaque  machine  (empateur,  ébulliteur,  fermenteur,  embouteilleuse)  sur  les  3 lignes.\n2. Batches en cours : noter les batch IDs actifs, leur phase (empâtage / fermentation / embouteillage) et l'heure estimée de fin.\n3.  Alarmes  :  lister  les  alarmes  actives  et  non  acquittées  (list_alarms).  Toute  alarme  non  résolue  doit  être  signalée verbalement au shift entrant.\n4. OEE du shift : communiquer les chiffres OEE de la période. Signaler toute anomalie (OEE < 60%, arrêt > 30 min).\n5. CIP : préciser si un CIP est en cours ou planifié sur quelle ligne.\n6. Actions en suspens : consignes modifiées, maintenances programmées, non-conformités ouvertes."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#14",
+  "text": "Cause et remédiation : contamination\nLe  défaut  'contamination'  sur  un  batch  signifie  que  des  micro-organismes  indésirables  ont  été  détectés  ou  que  les critères QC de contamination sont hors norme.\nCause principale : CIP non effectué ou incomplet (cip_ok = false). Cause secondaire : température de fermentation trop haute favorisant les bactéries lactiques.\nRemédiation immédiate : isoler le batch, déclencher un CIP complet sur toutes les cuves de la ligne. Vérifier les joints et vannes pour tout point de contamination croisée. Ne pas redémarrer la production avant que cip_ok soit confirmé sur le prochain batch."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#15",
+  "text": "Cause et remédiation : fermentation_hors_spec\nLe défaut 'fermentation_hors_spec' indique que la fermentation s'est déroulée hors des paramètres nominaux.\nCause  :  la  cuve  fermenteur  a  été  en  dehors  de  sa  bande  de  température  pendant  plus  de  10%  du  temps  de fermentation (visible dans cuves_hors_bande du batch context).\nConséquences  :  profil  aromatique  dégradé,  possible  sous-atténuation  ou  sur-atténuation,  risque  de  production  de composés indésirables (diacétyle excessif à haute température).\nRemédiation : vérifier et recalibrer le régulateur de température du fermenteur. Contrôler le groupe froid. Pour le batch impacté, faire une analyse sensorielle avant décision de mise en bouteille."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#16",
+  "text": "Cause et remédiation : volume_insuffisant\nLe défaut 'volume_insuffisant' signifie que l'embouteilleuse a produit moins de bouteilles que le seuil minimum pour la recette.\nCause principale : panne de l'embouteilleuse pendant le batch (indicateur de panne dans les tags). Cause secondaire : volume de moût insuffisant en entrée.\nDiagnostic : vérifier l'historique  du  tag  embouteilleuse.panne sur la période du batch. Si panne détectée, analyser la durée et l'impact sur le volume total.\nRemédiation : maintenance préventive sur les buses d'embouteillage. Vérifier la pression d'alimentation."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#17",
+  "text": "Paramètres nominaux : Blonde (lager)\nRecette blonde  -  bière de fermentation basse (lager).\nEmpâtage : 65°C ± 4°C (bande nominale [61-69°C]), durée 60 min.\nÉbullition : 100°C ± 2°C, durée 60 min.\nFermentation : 12°C ± 2°C (bande nominale [10-14°C]), durée 14 jours.\nCadence embouteilleuse : 50 bouteilles/min nominal.\nCIP obligatoire avant chaque batch. Durée totale du process : environ 16 jours."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#18",
+  "text": "Paramètres nominaux : IPA (ale)\nRecette IPA  -  bière de fermentation haute (ale), amère et aromatique.\nEmpâtage : 66°C ± 4°C (bande nominale [62-70°C]), durée 60 min.\nÉbullition : 100°C ± 2°C, durée 75 min (houblonnage en fin d'ébullition).\nFermentation : 20°C ± 2°C (bande nominale [18-22°C]), durée 7 jours.\nCadence embouteilleuse : 40 bouteilles/min nominal.\nAttention : la fermentation IPA est plus sensible aux écarts de température que la blonde  -  un écart de +5°C peut produire des esters indésirables."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#19",
+  "text": "Paramètres nominaux : Jalapeño (ale épicée)\nRecette jalapeño  -  ale épicée avec addition de piments jalapeño en fermentation.\nEmpâtage : 64°C ± 4°C (bande nominale [60-68°C]), durée 60 min.\nÉbullition : 100°C ± 2°C, durée 60 min.\nFermentation : 19°C ± 2°C (bande nominale [17-21°C]), durée 7 jours. Addition jalapeño frais à J+2.\nCadence embouteilleuse : 35 bouteilles/min nominal.\nNote : le contact avec les jalapeños abaisse légèrement le pH  -  surveiller l'acidité en cours de fermentation."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#20",
+  "text": "Maintenance préventive : empateur\nFréquence : hebdomadaire.\nChecks : vérifier le bon fonctionnement de la résistance chauffante (montée en température < 20 min pour atteindre 65°C) ; inspecter les agitateurs ; contrôler l'étanchéité des vannes de soutirage.\nSignes d'alerte : montée en température lente (> 30 min), température qui n'atteint pas la consigne, écart > 5°C entre consigne et mesure en régime établi.\nAction  :  si  la  résistance  ne  chauffe  plus  correctement,  vérifier  l'alimentation  électrique  et  le  relais  de  puissance. Contacter maintenance si le problème persiste."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#21",
+  "text": "Maintenance préventive : fermenteur\nFréquence : après chaque batch (nettoyage) + mensuelle (inspection physique).\nChecks mensuels : vérifier le groupe froid (pression du circuit, niveau de frigorigène) ; inspecter les joints de cuve pour tout signe de fuite ou de corrosion ; tester la sonde de température (comparer à thermomètre étalon  -  écart max admis : 0,5°C).\nSignes d'alerte : impossible de maintenir la consigne de température, oscillations importantes autour de la consigne, alarmes répétées de fermentation hors température.\nAction sur groupe froid défaillant : contacter le prestataire de maintenance frigorifique. Ne pas démarrer de nouveau batch sur la ligne tant que le groupe froid n'est pas opérationnel."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#22",
+  "text": "Maintenance préventive : embouteilleuse\nFréquence : quotidienne (avant démarrage) + hebdomadaire (complète).\nChecks quotidiens  :  vérifier  la  pression  d'alimentation  en  CO2  ;  inspecter  les  buses  de  remplissage  (obstructions)  ; vérifier le système de capsulage.\nChecks hebdomadaires : lubrification  des  parties  mécaniques  ;  vérification  de  l'alignement  des  convoyeurs  ;  test  du système d'évacuation des bouteilles mal remplies.\nSignes d'alerte : cadence en dessous de 80% du nominal sans explication (tag .cadence), pannes répétées (tag .panne = 1), taux de rebut > 5% (bouteilles_rebut / bouteilles_ok).\nLe tag embouteilleuse.panne = 1 déclenche automatiquement une alarme. Vérifier en priorité le bourrage mécanique et les buses bouchées."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#23",
+  "text": "Diagnostic OEE bas (< 50%)\nUn OEE inférieur à 50% indique un problème significatif sur la ligne. Décomposer en trois composantes :\nDisponibilité  basse  (<  70%)  :  la  machine  est  souvent  à  l'arrêt  ou  en  attente.  Vérifier  list_alarms  et  l'historique  des pannes. Causes fréquentes : arrêts non planifiés, attentes amont (en_attente = 1 prolongé), CIP trop fréquents.\nPerformance basse (< 80%) : la machine tourne mais en-dessous de la cadence nominale. Vérifier le tag .cadence vs ideal_rate. Causes : usure mécanique, pression d'alimentation insuffisante, matière première non conforme."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#24",
+  "text": "Diagnostic OEE bas (< 50%)\nQualité  basse  (<  80%)  :  trop  de  rebuts  à  l'embouteillage.  Vérifier  le  ratio  bouteilles_rebut  /  bouteilles_ok.  Causes  : contamination, défaut de bouchage, produit hors spec.\nAction recommandée  : identifier la composante dominante, puis investiguer avec get_history sur les tags correspondants sur la période concernée."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#25",
+  "text": "Alarme : fermentation trop chaude\nDéclenchement : température du fermenteur dépasse la limite haute de la bande nominale (blonde > 14°C, ipa > 22°C, jalapeño > 21°C) pendant plus de 5 minutes.\nRisques  :  production  d'esters  et  de  fusel  alcohols,  sur-atténuation,  profil  aromatique  dégradé.  Pour  l'IPA,  risque  de production de diacétyle excessif.\nActions immédiates : (1) vérifier la consigne de température (fermenteur.temp_consigne)  -  a-t-elle été modifiée ? ; (2) vérifier  le  groupe  froid  (indicateur  de  fonctionnement)  ;  (3)  si  écart  >  3°C  depuis  >  30  min,  le  batch  est  à  risque    documenter.\nAcquittement : acquitter l'alarme APRÈS avoir identifié et résolu la cause. Ne pas acquitter sans action corrective."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#26",
+  "text": "Alarme : fermentation trop froide\nDéclenchement : température du fermenteur passe sous la limite basse de la bande nominale (blonde < 10°C, ipa < 18°C, jalapeño < 17°C) pendant plus de 5 minutes.\nRisques : fermentation qui s'arrête (levures en dormance), sous-atténuation, batch non conforme.\nActions immédiates : (1) vérifier la consigne de température  -  valeur correcte ? ; (2) vérifier que le groupe froid n'est pas  en  sur-refroidissement  (problème  de  régulation)  ;  (3)  augmenter  la  consigne  si  nécessaire  (opération  assistant adjust_setpoint, cuve fermenteur  -  un ajustement, pas un changement de recette)."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#27",
+  "text": "Alarme : fermentation trop froide\nPour la blonde (lager) : une chute à 8°C peut être tolérée brièvement en fin de fermentation (garde froide), mais pas en début. Pour l'ipa et jalapeño : toute chute sous 15°C en début de fermentation est critique."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#28",
+  "text": "Alarme : panne embouteilleuse\nDéclenchement : tag embouteilleuse.panne = 1 (détection d'un blocage mécanique ou d'une anomalie de remplissage).\nActions immédiates : (1) arrêter l'alimentation en amont (vanne de transfert fermenteur -> embouteilleuse) ; (2) dégager\nle  bourrage  mécanique si présent (vérifier le convoyeur et les buses) ; (3) vérifier la pression CO2 (min 3 bar) ; (4) relancer en mode test (vitesse réduite) avant de reprendre la cadence nominale.\nSi la panne dure > 20 min : le moût en attente peut se dégrader. Évaluer si un retour en cuve tampon est possible. Acquitter l'alarme uniquement après redémarrage réussi."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#29",
+  "text": "Gestion d'un batch non conforme\nQuand un batch est marqué non conforme (defaut_type non nul dans la table batches) :"
+ },
+ {
+  "id": "manuel-exploitation-brasserie#30",
+  "text": "Gestion d'un batch non conforme\n1. ISOLER : bloquer physiquement les bouteilles produites (ne pas expédier). Étiqueter le lot \"EN QUARANTAINE\".\n2. DOCUMENTER : noter le batch ID, le defaut_type, les cuves concernées (cuves_hors_bande), le cip_ok.\n3. ÉVALUER selon le type de défaut :\n-  contamination  :  destruction  obligatoire  du  lot.  CIP  complet  avant  tout  nouveau  batch.  Analyse  microbiologique recommandée.\n-  fermentation_hors_spec  :  analyse  sensorielle  et  chimique  (taux  d'alcool,  pH,  amertume).  Selon  résultat  : déclassement (vente moindre qualité), retraitement si possible, ou destruction.\n-  rendement_faible  /  volume_insuffisant  :  le  produit  peut  être  conforme  en  qualité  mais  en  quantité  insuffisante. Analyser et décider au cas par cas."
+ },
+ {
+  "id": "manuel-exploitation-brasserie#31",
+  "text": "Gestion d'un batch non conforme\n4. TRACER : enregistrer la décision dans le système (id batch, décision, responsable, date).\n5. CORRIGER : identifier la cause racine et mettre en place une action corrective pour éviter la récurrence."
+ },
+ {
+  "id": "manuel-groupe-froid#1",
+  "text": "1. Présentation générale\nLe groupe froid alimente en glycol refroidi l'ensemble des cuves de fermentation du site, indépendamment des lignes de brassage. Contrairement aux équipements de ligne (cuves, embouteilleuses), le groupe froid est un équipement de SITE : il tourne en continu, 24 heures sur 24, et son fonctionnement n'est pas lié aux cycles de démarrage ou d'arrêt d'un batch particulier.\nLa consigne nominale de température de sortie glycol est fixée à 2,0 °C. Une dérive de plus de 2 °C par rapport à la consigne, en dehors d'un cycle de dégivrage planifié, doit être considérée comme un signe de défaillance et remontée à la maintenance frigorifique."
+ },
+ {
+  "id": "manuel-groupe-froid#2",
+  "text": "2. Cycle de dégivrage\nL'évaporateur du groupe froid givre progressivement en fonctionnement normal. Un cycle de dégivrage automatique se déclenche toutes les 15 minutes de fonctionnement effectif et dure environ 90 secondes. Pendant cette phase, la température de sortie glycol monte transitoirement jusqu'à environ 7 °C avant de redescendre à la consigne.\nCe dépassement pendant le dégivrage est NORMAL et ne doit pas être confondu avec une panne. Le point de vigilance est la DURÉE du dépassement : un retour à la consigne qui prend plus de 3 minutes, ou une température qui ne redescend pas sous 5 °C après 5 minutes, indique un problème réel (bouteille de glycol sous-remplie, défaillance du compresseur, vanne bloquée)."
+ },
+ {
+  "id": "manuel-groupe-froid#3",
+  "text": "3. Maintenance préventive\nContrôle hebdomadaire : vérifier le niveau de glycol dans le circuit, l'absence de givre anormal sur les tuyauteries en dehors du cycle de dégivrage, et l'état des joints des vannes trois voies.\nContrôle mensuel : mesurer la pression du circuit frigorifique côté haute et basse pression, comparer aux valeurs de référence constructeur. Un écart de plus de 15 % indique une charge de fluide frigorigène insuffisante ou un encrassement du condenseur.\nNettoyage du condenseur : trimestriel, à l'air comprimé sec, jamais à l'eau sous pression directement sur les ailettes (risque de déformation et perte d'efficacité d'échange)."
+ },
+ {
+  "id": "manuel-groupe-froid#4",
+  "text": "4. Alarmes et actions\nAlarme « écart de consigne prolongé » : si la température de sortie glycol reste au-dessus de la consigne + tolérance pendant plus de 5 minutes hors fenêtre de dégivrage attendue, arrêter les brassages en cours sur les lignes concernées et contacter le prestataire de maintenance frigorifique. Ne pas redémarrer de nouveau batch tant que le groupe froid n'est pas confirmé opérationnel.\nAlarme « dégivrage anormalement long » : si un cycle de dégivrage dépasse 3 minutes, suspecter un encrassement de l'évaporateur ou une sonde de dégivrage défaillante - planifier une intervention sous 24h, pas d'arrêt immédiat nécessaire si la consigne est retrouvée."
+ },
+ {
+  "id": "procedure-cO2-embouteilleuse#1",
+  "text": "1. Objet\nCette procédure décrit le remplacement d'un fût de CO2 alimentant le système de contre-pression et de sertissage de l'embouteilleuse. Le CO2 est utilisé pour maintenir la pression dans les bouteilles pendant le remplissage (évite la perte de carbonatation) et pour actionner certains vérins pneumatiques du capsuleur.\nFréquence de changement : un fût standard tient entre 3 et 5 jours de production en cadence nominale, selon la ligne. Prévoir un fût de rechange toujours disponible sur site - une rupture de CO2 en cours de service arrête immédiatement l'embouteillage."
+ },
+ {
+  "id": "procedure-cO2-embouteilleuse#2",
+  "text": "2. Signes avant-coureurs\nLe manomètre de sortie fût affiche normalement entre 50 et 57 bars à température ambiante. Une chute progressive sous 45 bars sur plusieurs heures indique un fût proche de la vidange - anticiper le changement avant la rupture complète plutôt que d'attendre l'arrêt machine.\nLe tag `.cadence` de l'embouteilleuse peut chuter légèrement dans les minutes précédant la rupture de CO2 (perte de contre-pression, remplissage moins efficace) - un signal précoce à surveiller en plus du manomètre."
+ },
+ {
+  "id": "procedure-cO2-embouteilleuse#3",
+  "text": "3. Étapes du changement\n1. Mettre l'embouteilleuse en pause via la commande d'arrêt de ligne (pas d'arrêt d'urgence, un arrêt normal suffit et évite de perdre le calibrage du sertisseur).\n2. Fermer la vanne du fût vide, purger lentement la ligne haute pression avant de débrancher le raccord (ne jamais débrancher sous pression).\n3. Remplacer le fût, rebrancher, ouvrir progressivement la vanne du nouveau fût en surveillant le manomètre.\n4. Vérifier l'absence de fuite au raccord (eau savonneuse, jamais de flamme).\n5. Relancer l'embouteilleuse et contrôler les 20 premières bouteilles produites (niveau de remplissage, sertissage) avant de laisser la ligne repartir en cadence normale."
+ },
+ {
+  "id": "procedure-cO2-embouteilleuse#4",
+  "text": "4. Sécurité\nLe CO2 est inodore et plus lourd que l'air : en cas de fuite importante dans un local mal ventilé, il s'accumule au sol et peut provoquer une asphyxie sans signe d'alerte olfactif. Toujours effectuer le changement de fût en présence d'un détecteur de CO2 ambiant fonctionnel, et ventiler le local avant intervention si le détecteur a déclenché récemment.\nNe jamais forcer un raccord grippé : un fût mal purgé sous pression résiduelle peut projeter le raccord violemment à l'ouverture."
+ }
+]

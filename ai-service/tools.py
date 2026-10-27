@@ -39,6 +39,10 @@ _MAX_ROWS = 30
 # bon chunk dans son top 3 sur l'éval du corpus.
 _RERANK_CANDIDATES = 10
 _KNOWLEDGE_RESULTS = 5
+# Score reranker minimal pour garder un passage (au moins 1 gardé quoi qu'il
+# arrive). Réglé sur evals/retrieval.py : à -5, aucun passage pertinent perdu
+# et le bruit passe de 3,7 à 2 passages par question ; à -4, on en perd.
+_RERANK_MIN_SCORE = -5.0
 
 
 def _trim(rows: list[dict], keep: tuple[str, ...], max_rows: int = _MAX_ROWS) -> list[dict]:
@@ -167,6 +171,7 @@ async def search_knowledge(
         for hit, score in zip(hits, scores):
             hit["score"] = f"{score:.4f}"
         hits.sort(key=lambda h: float(h["score"]), reverse=True)
+        hits = hits[:1] + [h for h in hits[1:] if float(h["score"]) >= _RERANK_MIN_SCORE]
     return json.dumps(hits[:_KNOWLEDGE_RESULTS])
 
 

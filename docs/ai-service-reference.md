@@ -350,11 +350,14 @@ demanderait en plus de migrer la colonne `vector(768)`.
 **Reranker** (`ai-service/reranker.py`) : `search_knowledge` demande 10
 candidats à la gateway (`limit`), un cross-encoder (`BAAI/bge-reranker-v2-m3`,
 multilingue) note chaque paire (question, chunk) lue ensemble, on garde les 5
-meilleurs. Sur la même éval : 1re position 85 % → 93 %. Coût ~4 s par
+meilleurs **au-dessus d'un score de -5** (le 1er toujours gardé). Seuil réglé
+sur `evals/retrieval.py` : aucun passage pertinent perdu, bruit ramené de 3,7
+à 2 passages par question ; à -4, on commence à perdre des passages utiles. Sur la même éval : 1re position 85 % → 93 %. Coût ~4 s par
 recherche dans Docker (CPU, pas de GPU Metal), linéaire en nombre de
 candidats — d'où 10 et pas 20 (8 s) ; modèle (~2,3 Go) téléchargé depuis Hugging Face au premier
-appel (volume `hf-cache`). Indisponible → ordre RRF conservé (dégradé, pas en
-panne). Désactivable avec `RERANK_MODEL=` (vide).
+appel (volume `hf-cache`), puis chargé avec `local_files_only` : aucun appel
+réseau une fois en cache (sinon `transformers` interroge Hugging Face à chaque
+chargement). Indisponible → ordre RRF conservé (dégradé, pas en panne). Désactivable avec `RERANK_MODEL=` (vide).
 
 ### 6.2 Stockage et recherche : hybride dense + lexical, fusion RRF
 
@@ -373,13 +376,7 @@ score = COALESCE(1.0/(60+rang_dense), 0) + COALESCE(1.0/(60+rang_lexical), 0)
 via une requête à base de CTE (`dense`, `lexical`, `fused`), `FULL OUTER
 JOIN` sur l'id du chunk, top `limit` retournés (5 par défaut, 10 quand
 ai-service reclasse ensuite avec le reranker). Chaque résultat porte une `source`
-identifiable (`id`, `category`, `title`) — permet d'afficher une citation
-côté futur front si besoin, pas exploité pour l'instant.
-
-⚠️ Les scores RRF sont petits par construction (max théorique ~0.033, un
-chunk classé #1 dans les deux listes) — ne pas les comparer à une similarité
-cosinus brute (échelle 0-1). C'est un score de FUSION/classement relatif, pas
-une mesure de confiance absolue.
+identifiable (`id`, `category`, `title`).
 
 ### 6.3 Ingestion : Docling (`ingest.py`)
 
@@ -460,6 +457,30 @@ seulement les nôtres.
 date par `ai-service/ingest.py`, jamais nettoyé jusqu'à cette session.
 Supprimé avec `pdfjs-dist`/`@langchain/textsplitters` (plus aucun usage côté
 gateway).
+
+### 6.5 Sources affichées et citations
+
+- **Front** (`web/src/AssistantView.tsx::KnowledgeSources`) : bloc repliable
+  « Documents consultés » sous chaque réponse, construit depuis le RÉSULTAT de
+  `search_knowledge` (pas depuis le texte du modèle) — fiable même si le modèle
+  oublie de citer. Ce sont les passages consultés, pas forcément utilisés.
+- **Citations par le modèle : essayé, retiré (2026-10-27).** Une consigne du
+  prompt système (« termine par `Sources : <titres de section>` ») n'a été
+  suivie que dans **1 réponse sur 24** par qwen3.5:9b (`evals/citations.py`,
+  correcteur en code : ligne présente, aucun titre inventé, un passage
+  pertinent cité), avec une baisse possible du choix d'outil (pass^5 0,857
+  contre 0,905, revenu à 0,905 sans la consigne). D'où l'affichage par le
+  code ci-dessus. Gardé : la consigne d'abstention (« dire que la base ne
+  contient pas l'information plutôt que répondre de mémoire »), sans effet
+  mesuré sur le choix d'outil. L'éval reste pour retester (autre modèle,
+  consigne placée dans le résultat de l'outil).
+- Non mesuré : la fidélité de la réponse aux passages (LLM juge ou NLI, à
+  faire dans l'éval, hors du chemin de prod pour ne pas ajouter de latence).
+
+⚠️ Les scores RRF sont petits par construction (max théorique ~0.033, un
+chunk classé #1 dans les deux listes) — ne pas les comparer à une similarité
+cosinus brute (échelle 0-1). C'est un score de FUSION/classement relatif, pas
+une mesure de confiance absolue.
 
 ## 7. Sécurité
 
@@ -582,3 +603,7 @@ avant toute écriture — le garde-fou est dans le code, pas dans le prompt.
 | `pyproject.toml` / `uv.lock` | dépendances (uv) |
 | `knowledge-pdfs/` | les 3 PDF sources du RAG |
 | `tests/test_operation_tools.py` | tests de contrat (schémas fermés, routing) |
+| `evals/tool_selection.py` | éval choix d'outil + arguments (pass^k) |
+| `evals/retrieval.py` | éval de recherche (hit@k, MRR) + réglage du seuil reranker |
+| `evals/citations.py` | éval des citations `Sources :` |
+| `evals/fixtures/knowledge_chunks.json` | les 39 passages réels, figés pour les évals |

@@ -28,6 +28,7 @@ cf. web/src/AssistantView.tsx::InterruptCard), puis reprend le graphe
 import json
 import os
 import operator
+import uuid
 from typing import Annotated, TypedDict
 
 from langchain_core.messages import AIMessage, AnyMessage, SystemMessage, ToolMessage
@@ -70,6 +71,8 @@ SYSTEM_PROMPT_STATIC = (
     "'quelle procédure', ou demandant une recommandation / un plan d'action : appelle search_knowledge EN PREMIER "
     "avec la description du problème. Ne commence PAS par investiguer les tags ou les alarmes — la connaissance "
     "procédurale est dans search_knowledge. Tu peux ensuite compléter avec les données en temps réel si nécessaire. "
+    "Si aucun passage renvoyé par search_knowledge ne répond à la question, dis que la base de connaissances ne "
+    "contient pas cette information au lieu de répondre de mémoire. "
     "Pour investiguer l'état d'une machine ou diagnostiquer un problème opérationnel, enchaîne librement "
     "les tools : list_alarms (alarmes actives/non acquittées), get_history (tendance d'un tag), "
     "describe_schema + query_readonly (SQL libre en lecture seule). "
@@ -168,7 +171,9 @@ async def _forced_batch_node(state: AgentState) -> dict:
 
     new_messages: list[AnyMessage] = []
 
-    call_id = "forced_batch_context"
+    # Id unique par appel : deux diagnostics dans le même thread ne doivent pas
+    # partager un tool_call_id (le front rattache chaque résultat à son appel).
+    call_id = f"forced_batch_context_{uuid.uuid4().hex[:8]}"
     result = await get_batch_context.ainvoke({"batch_ref": batch_ref})
     new_messages.append(AIMessage(content="", tool_calls=[
         {"name": "get_batch_context", "args": {"batch_ref": batch_ref}, "id": call_id},
@@ -178,7 +183,7 @@ async def _forced_batch_node(state: AgentState) -> dict:
     ctx = json.loads(result)
     query = build_knowledge_query(ctx)
     if query:
-        call_id2 = "forced_search_knowledge"
+        call_id2 = f"forced_search_knowledge_{uuid.uuid4().hex[:8]}"
         result2 = await search_knowledge.ainvoke({"query": query})
         new_messages.append(AIMessage(content="", tool_calls=[
             {"name": "search_knowledge", "args": {"query": query}, "id": call_id2},
@@ -198,9 +203,9 @@ async def _forced_line_blocked_node(state: AgentState) -> dict:
     if not line:
         return {}
 
-    status_id = "forced_line_status"
+    status_id = f"forced_line_status_{uuid.uuid4().hex[:8]}"
     status = await get_line_status.ainvoke({"line": line})
-    knowledge_id = "forced_line_procedure"
+    knowledge_id = f"forced_line_procedure_{uuid.uuid4().hex[:8]}"
     knowledge = await search_knowledge.ainvoke({"query": f"ligne bloquée {line} panne attente embouteilleuse"})
     return {
         "messages": [
