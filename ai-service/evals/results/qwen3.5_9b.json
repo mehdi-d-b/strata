@@ -1,0 +1,1216 @@
+{
+  "summary": {
+    "model": "qwen3.5:9b",
+    "k": 5,
+    "think": false,
+    "n_cases": 21,
+    "tool_accuracy": 0.952,
+    "args_accuracy": 0.952,
+    "pass_hat_k": 0.905,
+    "leak_rate": 0.0,
+    "median_latency_s": 2.58
+  },
+  "cases": [
+    {
+      "question": "Quel est l'OEE de la ligne blonde sur les 7 derniers jours ?",
+      "expected": [
+        "get_oee"
+      ],
+      "runs": [
+        {
+          "tool": "get_oee",
+          "args": {
+            "days": 7,
+            "line": "brasserie.blonde"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 15.56
+        },
+        {
+          "tool": "get_oee",
+          "args": {
+            "days": 7,
+            "line": "brasserie.blonde"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.92
+        },
+        {
+          "tool": "get_oee",
+          "args": {
+            "days": 7,
+            "line": "brasserie.blonde"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.94
+        },
+        {
+          "tool": "get_oee",
+          "args": {
+            "days": 7,
+            "line": "brasserie.blonde"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.97
+        },
+        {
+          "tool": "get_oee",
+          "args": {
+            "days": 7,
+            "line": "brasserie.blonde"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.97
+        }
+      ],
+      "pass_all": true
+    },
+    {
+      "question": "Résume l'OEE de la blonde",
+      "expected": [
+        "get_oee"
+      ],
+      "runs": [
+        {
+          "tool": "get_oee",
+          "args": {
+            "line": "brasserie.blonde"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 6.28
+        },
+        {
+          "tool": "get_oee",
+          "args": {
+            "line": "brasserie.blonde"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.2
+        },
+        {
+          "tool": "get_oee",
+          "args": {
+            "line": "brasserie.blonde"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.19
+        },
+        {
+          "tool": "get_oee",
+          "args": {
+            "line": "brasserie.blonde"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.18
+        },
+        {
+          "tool": "get_oee",
+          "args": {
+            "line": "brasserie.blonde"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.19
+        }
+      ],
+      "pass_all": true
+    },
+    {
+      "question": "Donne-moi l'OEE de la ligne IPA",
+      "expected": [
+        "get_oee"
+      ],
+      "runs": [
+        {
+          "tool": "get_oee",
+          "args": {
+            "line": "brasserie.ipa"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 6.28
+        },
+        {
+          "tool": "get_oee",
+          "args": {
+            "days": 7,
+            "line": "brasserie.ipa"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 3.08
+        },
+        {
+          "tool": "get_oee",
+          "args": {
+            "line": "brasserie.ipa"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.34
+        },
+        {
+          "tool": "get_oee",
+          "args": {
+            "line": "brasserie.ipa"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.34
+        },
+        {
+          "tool": "get_oee",
+          "args": {
+            "line": "brasserie.ipa"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.23
+        }
+      ],
+      "pass_all": true
+    },
+    {
+      "question": "Combien de bonnes pièces et de rebut cette semaine ?",
+      "expected": [
+        "get_production"
+      ],
+      "runs": [
+        {
+          "tool": "get_production",
+          "args": {
+            "days": 7
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 6.09
+        },
+        {
+          "tool": "get_production",
+          "args": {
+            "days": 7
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.92
+        },
+        {
+          "tool": "get_production",
+          "args": {
+            "days": 7
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.94
+        },
+        {
+          "tool": "get_production",
+          "args": {
+            "days": 7
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.01
+        },
+        {
+          "tool": "get_production",
+          "args": {
+            "days": 7
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.96
+        }
+      ],
+      "pass_all": true
+    },
+    {
+      "question": "Quelles sont les alarmes actives ?",
+      "expected": [
+        "list_alarms"
+      ],
+      "runs": [
+        {
+          "tool": "list_alarms",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 5.5
+        },
+        {
+          "tool": "list_alarms",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.3
+        },
+        {
+          "tool": "list_alarms",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.3
+        },
+        {
+          "tool": "list_alarms",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.31
+        },
+        {
+          "tool": "list_alarms",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.32
+        }
+      ],
+      "pass_all": true
+    },
+    {
+      "question": "Combien y a-t-il de batches en cours ?",
+      "expected": [
+        "get_active_batches"
+      ],
+      "runs": [
+        {
+          "tool": "get_active_batches",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 5.23
+        },
+        {
+          "tool": "get_active_batches",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.99
+        },
+        {
+          "tool": "get_active_batches",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.27
+        },
+        {
+          "tool": "get_active_batches",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.27
+        },
+        {
+          "tool": "get_active_batches",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.26
+        }
+      ],
+      "pass_all": true
+    },
+    {
+      "question": "Liste les batches en cours",
+      "expected": [
+        "get_active_batches"
+      ],
+      "runs": [
+        {
+          "tool": "get_active_batches",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 5.39
+        },
+        {
+          "tool": "get_active_batches",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.24
+        },
+        {
+          "tool": "get_active_batches",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.25
+        },
+        {
+          "tool": "get_active_batches",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.26
+        },
+        {
+          "tool": "get_active_batches",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.25
+        }
+      ],
+      "pass_all": true
+    },
+    {
+      "question": "Montre-moi la température du fermenteur IPA sur la dernière heure",
+      "expected": [
+        "get_history"
+      ],
+      "runs": [
+        {
+          "tool": "get_history",
+          "args": {
+            "tag": "brasserie.ipa.fermenteur.temperature",
+            "minutes": 60
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 7.4
+        },
+        {
+          "tool": "get_history",
+          "args": {
+            "tag": "brasserie.ipa.fermenteur.temperature",
+            "minutes": 60
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 3.37
+        },
+        {
+          "tool": "get_history",
+          "args": {
+            "tag": "brasserie.ipa.fermenteur.temperature",
+            "minutes": 60
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 3.43
+        },
+        {
+          "tool": "get_history",
+          "args": {
+            "tag": "brasserie.ipa.fermenteur.temperature",
+            "minutes": 60
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 3.45
+        },
+        {
+          "tool": "get_history",
+          "args": {
+            "tag": "brasserie.ipa.fermenteur.temperature",
+            "minutes": 60
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 3.41
+        }
+      ],
+      "pass_all": true
+    },
+    {
+      "question": "Où en est la ligne jalapeno en ce moment ?",
+      "expected": [
+        "get_line_status"
+      ],
+      "runs": [
+        {
+          "tool": "get_line_status",
+          "args": {
+            "line": "brasserie.jalapeno"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 6.43
+        },
+        {
+          "tool": "get_line_status",
+          "args": {
+            "line": "brasserie.jalapeno"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.26
+        },
+        {
+          "tool": "get_line_status",
+          "args": {
+            "line": "brasserie.jalapeno"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.27
+        },
+        {
+          "tool": "get_line_status",
+          "args": {
+            "line": "brasserie.jalapeno"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.31
+        },
+        {
+          "tool": "get_line_status",
+          "args": {
+            "line": "brasserie.jalapeno"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.3
+        }
+      ],
+      "pass_all": true
+    },
+    {
+      "question": "Résume-moi le shift en cours",
+      "expected": [
+        "get_shift_summary"
+      ],
+      "runs": [
+        {
+          "tool": "get_shift_summary",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 5.46
+        },
+        {
+          "tool": "get_shift_summary",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.25
+        },
+        {
+          "tool": "get_shift_summary",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.25
+        },
+        {
+          "tool": "get_shift_summary",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.25
+        },
+        {
+          "tool": "get_shift_summary",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.26
+        }
+      ],
+      "pass_all": true
+    },
+    {
+      "question": "Quelles sont les principales pertes d'OEE aujourd'hui ?",
+      "expected": [
+        "get_oee_breakdown"
+      ],
+      "runs": [
+        {
+          "tool": "get_oee_breakdown",
+          "args": {
+            "days": 1
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 6.33
+        },
+        {
+          "tool": "get_oee_breakdown",
+          "args": {
+            "days": 1
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.1
+        },
+        {
+          "tool": "get_oee_breakdown",
+          "args": {
+            "days": 1
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.18
+        },
+        {
+          "tool": "get_oee_breakdown",
+          "args": {
+            "days": 1
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.17
+        },
+        {
+          "tool": "get_oee_breakdown",
+          "args": {
+            "days": 1
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.17
+        }
+      ],
+      "pass_all": true
+    },
+    {
+      "question": "Comment changer un fût de CO2 ?",
+      "expected": [
+        "search_knowledge"
+      ],
+      "runs": [
+        {
+          "tool": "search_knowledge",
+          "args": {
+            "query": "comment changer un fût de CO2 brasserie procédure remplacement bouteille gaz carbonique"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 7.09
+        },
+        {
+          "tool": "search_knowledge",
+          "args": {
+            "query": "comment changer un fût de CO2 procédure remplacement bouteille gaz carbonique brasserie"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.91
+        },
+        {
+          "tool": "search_knowledge",
+          "args": {
+            "query": "changer un fût de CO2 procédure opérationnelle"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.62
+        },
+        {
+          "tool": "search_knowledge",
+          "args": {
+            "query": "comment changer un fût de CO2 brasserie procédure remplacement cylindre gaz carbonique"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 3.04
+        },
+        {
+          "tool": "search_knowledge",
+          "args": {
+            "query": "comment changer un fût de CO2 brasserie procédure remplacement bouteille gaz carbonique"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.98
+        }
+      ],
+      "pass_all": true
+    },
+    {
+      "question": "Que faire si la pompe de l'empâteur fait un bruit anormal ?",
+      "expected": [
+        "search_knowledge"
+      ],
+      "runs": [
+        {
+          "tool": "search_knowledge",
+          "args": {
+            "query": "bruit anormal pompe empateur dépannage procédure"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 6.79
+        },
+        {
+          "tool": "search_knowledge",
+          "args": {
+            "query": "bruit anormal pompe empateur dépannage procédure"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.58
+        },
+        {
+          "tool": "search_knowledge",
+          "args": {
+            "query": "bruit anormal pompe empateur dépannage procédure"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.66
+        },
+        {
+          "tool": "search_knowledge",
+          "args": {
+            "query": "bruit anormal pompe empateur cause diagnostic procédure"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.57
+        },
+        {
+          "tool": "search_knowledge",
+          "args": {
+            "query": "bruit anormal pompe empateur cause dépannage procédure"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.72
+        }
+      ],
+      "pass_all": true
+    },
+    {
+      "question": "Quelle est la procédure de nettoyage CIP ?",
+      "expected": [
+        "search_knowledge"
+      ],
+      "runs": [
+        {
+          "tool": "search_knowledge",
+          "args": {
+            "query": "procédure de nettoyage CIP (Clean In Place) brasserie bière"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 7.06
+        },
+        {
+          "tool": "search_knowledge",
+          "args": {
+            "query": "procédure de nettoyage CIP brasserie"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.5
+        },
+        {
+          "tool": "search_knowledge",
+          "args": {
+            "query": "procédure de nettoyage CIP brasserie"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.54
+        },
+        {
+          "tool": "search_knowledge",
+          "args": {
+            "query": "procédure de nettoyage CIP brasserie"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.51
+        },
+        {
+          "tool": "search_knowledge",
+          "args": {
+            "query": "procédure de nettoyage CIP brasserie"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.52
+        }
+      ],
+      "pass_all": true
+    },
+    {
+      "question": "Arrête la ligne blonde",
+      "expected": [
+        "search_knowledge"
+      ],
+      "runs": [
+        {
+          "tool": "search_knowledge",
+          "args": {
+            "query": "procédure d'arrêt normal d'une ligne brasserie, stop_line, prérequis sécurité"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 9.64
+        },
+        {
+          "tool": "search_knowledge",
+          "args": {
+            "query": "procédure d'arrêt normal d'une ligne brasserie blonde stop_line précautions interlocks sécurité"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 5.52
+        },
+        {
+          "tool": "search_knowledge",
+          "args": {
+            "query": "procédure d'arrêt normal d'une ligne brasserie SOP stop_line précautions"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 5.21
+        },
+        {
+          "tool": "search_knowledge",
+          "args": {
+            "query": "procédure d'arrêt normal d'une ligne brasserie blonde stop_line précautions interlocks sécurité"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 5.65
+        },
+        {
+          "tool": "get_active_batches",
+          "args": {},
+          "tool_ok": false,
+          "args_ok": false,
+          "leak": false,
+          "latency_s": 4.05
+        }
+      ],
+      "pass_all": false
+    },
+    {
+      "question": "Démarre la ligne IPA",
+      "expected": [
+        "search_knowledge"
+      ],
+      "runs": [
+        {
+          "tool": "search_knowledge",
+          "args": {
+            "query": "procédure démarrage normal de la ligne brasserie.ipa (start_line) précautions vérifications SOPs"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 7.84
+        },
+        {
+          "tool": "get_line_status",
+          "args": {
+            "line": "brasserie.ipa"
+          },
+          "tool_ok": false,
+          "args_ok": false,
+          "leak": false,
+          "latency_s": 3.74
+        },
+        {
+          "tool": "get_active_batches",
+          "args": {},
+          "tool_ok": false,
+          "args_ok": false,
+          "leak": false,
+          "latency_s": 3.18
+        },
+        {
+          "tool": "get_active_batches",
+          "args": {},
+          "tool_ok": false,
+          "args_ok": false,
+          "leak": false,
+          "latency_s": 2.81
+        },
+        {
+          "tool": "get_active_batches",
+          "args": {},
+          "tool_ok": false,
+          "args_ok": false,
+          "leak": false,
+          "latency_s": 3.33
+        }
+      ],
+      "pass_all": false
+    },
+    {
+      "question": "Monte la consigne du fermenteur de la blonde à 12 °C",
+      "expected": [
+        "adjust_setpoint"
+      ],
+      "runs": [
+        {
+          "tool": "adjust_setpoint",
+          "args": {
+            "line": "brasserie.blonde",
+            "vessel": "fermenteur",
+            "value": 12
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 8.31
+        },
+        {
+          "tool": "adjust_setpoint",
+          "args": {
+            "line": "brasserie.blonde",
+            "vessel": "fermenteur",
+            "value": 12
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 4.24
+        },
+        {
+          "tool": "adjust_setpoint",
+          "args": {
+            "line": "brasserie.blonde",
+            "vessel": "fermenteur",
+            "value": 12
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 4.28
+        },
+        {
+          "tool": "adjust_setpoint",
+          "args": {
+            "line": "brasserie.blonde",
+            "vessel": "fermenteur",
+            "value": 12
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 4.39
+        },
+        {
+          "tool": "adjust_setpoint",
+          "args": {
+            "line": "brasserie.blonde",
+            "vessel": "fermenteur",
+            "value": 12
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 4.18
+        }
+      ],
+      "pass_all": true
+    },
+    {
+      "question": "Acquitte l'alarme 42",
+      "expected": [
+        "ack_alarm"
+      ],
+      "runs": [
+        {
+          "tool": "ack_alarm",
+          "args": {
+            "alarm_id": "42"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 6.34
+        },
+        {
+          "tool": "ack_alarm",
+          "args": {
+            "alarm_id": "42"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.19
+        },
+        {
+          "tool": "ack_alarm",
+          "args": {
+            "alarm_id": "42"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.22
+        },
+        {
+          "tool": "ack_alarm",
+          "args": {
+            "alarm_id": "42"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.22
+        },
+        {
+          "tool": "ack_alarm",
+          "args": {
+            "alarm_id": "42"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.21
+        }
+      ],
+      "pass_all": true
+    },
+    {
+      "question": "Pourquoi le dernier batch IPA est-il hors spec ?",
+      "expected": [
+        "get_batch_context"
+      ],
+      "runs": [
+        {
+          "tool": "get_batch_context",
+          "args": {
+            "batch_ref": "dernier ipa"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 6.49
+        },
+        {
+          "tool": "get_batch_context",
+          "args": {
+            "batch_ref": "dernier ipa"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.2
+        },
+        {
+          "tool": "get_batch_context",
+          "args": {
+            "batch_ref": "dernier ipa"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.27
+        },
+        {
+          "tool": "get_batch_context",
+          "args": {
+            "batch_ref": "dernier ipa"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.32
+        },
+        {
+          "tool": "get_batch_context",
+          "args": {
+            "batch_ref": "dernier ipa"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.26
+        }
+      ],
+      "pass_all": true
+    },
+    {
+      "question": "Quelles tables de données sont disponibles ?",
+      "expected": [
+        "describe_schema"
+      ],
+      "runs": [
+        {
+          "tool": "describe_schema",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 5.51
+        },
+        {
+          "tool": "describe_schema",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.25
+        },
+        {
+          "tool": "describe_schema",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.24
+        },
+        {
+          "tool": "describe_schema",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.26
+        },
+        {
+          "tool": "describe_schema",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 1.29
+        }
+      ],
+      "pass_all": true
+    },
+    {
+      "question": "Combien de batches IPA ont été produits depuis le début du mois ?",
+      "expected": [
+        "describe_schema",
+        "query_readonly"
+      ],
+      "runs": [
+        {
+          "tool": "query_readonly",
+          "args": {
+            "sql": "SELECT COUNT(*) as count FROM production WHERE recipe = 'ipa' AND start_time >= (CURRENT_DATE - INTERVAL '1 month')"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 7.92
+        },
+        {
+          "tool": "describe_schema",
+          "args": {},
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 2.7
+        },
+        {
+          "tool": "query_readonly",
+          "args": {
+            "sql": "SELECT COUNT(*) as batch_count FROM production WHERE recipe = 'ipa' AND start_time >= (CURRENT_DATE - INTERVAL '1 month')"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 3.82
+        },
+        {
+          "tool": "query_readonly",
+          "args": {
+            "sql": "SELECT COUNT(*) as batch_count FROM production_history WHERE recipe = 'ipa' AND start_time >= DATE_TRUNC('month', CURRENT_TIMESTAMP)"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 3.83
+        },
+        {
+          "tool": "query_readonly",
+          "args": {
+            "sql": "SELECT COUNT(*) as batch_count FROM production_history WHERE recipe = 'ipa' AND start_time >= CURRENT_DATE - INTERVAL '1 month'"
+          },
+          "tool_ok": true,
+          "args_ok": true,
+          "leak": false,
+          "latency_s": 3.81
+        }
+      ],
+      "pass_all": true
+    }
+  ]
+}

@@ -44,8 +44,9 @@ from tools import ALL_TOOLS, WRITE_TOOLS, get_batch_context, get_line_status, se
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 # AI_SERVICE_MODEL, pas ASSISTANT_MODEL (réservée à gateway/src/assistant.ts) :
-# qwen2.5:7b, choisi après tests de tool-calling via LangGraph (cf. docker-compose.yml).
-AI_SERVICE_MODEL = os.environ.get("AI_SERVICE_MODEL", "qwen2.5:7b")
+# qwen3.5:9b, choisi sur l'éval evals/tool_selection.py (cf. docker-compose.yml).
+AI_SERVICE_MODEL = os.environ.get("AI_SERVICE_MODEL", "qwen3.5:9b")
+AI_SERVICE_THINK = os.environ.get("AI_SERVICE_THINK", "false").lower() == "true"
 MAX_STEPS = 10
 
 READ_TOOLS = [t for t in ALL_TOOLS if t.name not in WRITE_TOOLS]
@@ -107,7 +108,13 @@ def _llm():
     # l'API /v1 (OpenAI-compat) ignore num_ctx et retombe à ~2048 (troncatures
     # déjà rencontrées côté gateway) ; temperature=0.2 car une valeur plus haute
     # rend l'appel d'outil moins fiable (observé en local sur ce projet).
-    return ChatOllama(model=AI_SERVICE_MODEL, base_url=OLLAMA_URL, num_ctx=8192, temperature=0.2)
+    # reasoning=False coupe le mode réflexion (Qwen3.5…) : beaucoup plus de
+    # latence pour un choix d'outil pas meilleur ici. Sans effet sur un modèle
+    # qui ne réfléchit pas (qwen2.5), vérifié en direct.
+    return ChatOllama(
+        model=AI_SERVICE_MODEL, base_url=OLLAMA_URL, num_ctx=8192, temperature=0.2,
+        reasoning=AI_SERVICE_THINK,
+    )
 
 
 async def _summarize_write(tool: str, args: dict) -> str:

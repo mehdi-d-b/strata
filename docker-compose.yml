@@ -284,11 +284,13 @@ services:
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       # Var dédiée (pas ASSISTANT_MODEL, réservée à la gateway) : sinon
       # ASSISTANT_MODEL=qwen2.5:14b dans .env écraserait silencieusement ce
-      # défaut. qwen2.5:7b choisi ici après tests de tool-calling (2026-07-17) :
-      # fiable en pratique via LangGraph/ChatOllama, contrairement à mistral:7b
-      # (trop sensible à la formulation exacte) — et même famille que le 14b de
-      # prod, donc le comportement de tool-calling reste comparable.
-      AI_SERVICE_MODEL: ${AI_SERVICE_MODEL:-qwen2.5:7b}
+      # défaut. qwen3.5:9b (GGUF Q4_K_M) choisi le 2026-10-27 sur l'éval
+      # ai-service/evals/tool_selection.py (21 questions × 5 essais, prompt de
+      # prod) : pass^5 0.905 contre 0.857 pour qwen2.5:7b (qui sautait la SOP
+      # avant d'arrêter/démarrer une ligne), ~1 s de plus par appel. La variante
+      # qwen3.5:9b-mlx (NVFP4) n'était pas plus rapide sur le M4 16 Go et prend
+      # 8,4 Go au lieu de 5,6. Mode réflexion coupé (AI_SERVICE_THINK, graph.py).
+      AI_SERVICE_MODEL: ${AI_SERVICE_MODEL:-qwen3.5:9b}
     # Pas de port hôte : le serveur LangGraph ne doit être joignable que par la
     # gateway, qui est l'unique frontière d'authentification de l'application.
     restart: unless-stopped
