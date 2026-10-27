@@ -289,6 +289,10 @@ services:
       # (trop sensible à la formulation exacte) — et même famille que le 14b de
       # prod, donc le comportement de tool-calling reste comparable.
       AI_SERVICE_MODEL: ${AI_SERVICE_MODEL:-qwen2.5:7b}
+    # Cache Hugging Face (reranker ~2,3 Go, modèle de mise en page Docling) :
+    # téléchargé une fois, survit aux rebuilds de l'image.
+    volumes:
+      - hf-cache:/root/.cache/huggingface
     # Pas de port hôte : le serveur LangGraph ne doit être joignable que par la
     # gateway, qui est l'unique frontière d'authentification de l'application.
     restart: unless-stopped
@@ -298,3 +302,4 @@ volumes:
   timescale-data:
   risingwave-data:
   ollama-data:
+  hf-cache:

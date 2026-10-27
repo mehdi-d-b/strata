@@ -35,7 +35,7 @@ import {
 import { deployDevice, undeployDevice } from "./plc4x.js";
 import { AlarmEngine } from "./alarms.js";
 import { BatchTracker } from "./batches.js";
-import { embed } from "./embeddings.js";
+import { EMBED_MODEL, embedDocument, embedQuery } from "./embeddings.js";
 
 const KAFKA_BROKERS = (process.env.KAFKA_BROKERS ?? "redpanda:9092").split(",");
 const PG_DSN =
@@ -919,11 +919,14 @@ app.post("/api/query-readonly", { preHandler: requireAuth }, async (req, reply) 
 // Recherche hybride : dense (sens) + plein texte (codes, tags et noms machine),
 // fusionnés par reciprocal-rank fusion. Les sources retournées restent visibles
 // pour permettre au modèle de fonder sa réponse sur une procédure identifiable.
+// `limit` (défaut 5, max 20) : ai-service demande plus de candidats pour les
+// reclasser avec son reranker avant d'en garder 5.
 app.post("/api/knowledge/search", { preHandler: requireAuth }, async (req, reply) => {
-  const body = req.body as { query?: string };
+  const body = req.body as { query?: string; limit?: number };
   const query = String(body.query ?? "").trim();
   if (!query) return reply.code(400).send({ error: "query requis" });
-  const vec = await embed(query);
+  const limit = Math.min(Math.max(Math.trunc(Number(body.limit) || 5), 1), 20);
+  const vec = await embedQuery(query);
   const { rows } = await pool.query(
     `WITH q AS (
        SELECT $1::vector AS embedding, websearch_to_tsquery('french', $2) AS terms
@@ -941,8 +944,8 @@ app.post("/api/knowledge/search", { preHandler: requireAuth }, async (req, reply
      )
      SELECT k.id, k.category, k.title, k.body, f.score
      FROM fused f JOIN knowledge k ON k.id = f.id
-     ORDER BY f.score DESC LIMIT 5`,
-    [`[${vec.join(",")}]`, query],
+     ORDER BY f.score DESC LIMIT $3`,
+    [`[${vec.join(",")}]`, query, limit],
   );
   if (rows.length === 0) return { message: "Aucun document trouvé dans la base de connaissances." };
   return rows.map((r) => ({
@@ -953,11 +956,14 @@ app.post("/api/knowledge/search", { preHandler: requireAuth }, async (req, reply
 });
 
 // Upsert d'un chunk dans la base de connaissances. L'embedding est calculé côté
-// appelant (ai-service/ingest.py, via Ollama) — cette route ne fait que stocker,
-// elle n'a pas besoin de connaître le modèle d'embedding utilisé. Idempotent
-// (ON CONFLICT category+title, qui encode le numéro de chunk).
+// appelant (ai-service/ingest.py, via Ollama) — cette route ne fait que stocker.
+// `embed_model` est conservé tel quel : un chunk embeddé avec un autre modèle
+// que EMBED_MODEL (ou sans le préciser) sera ré-embeddé au prochain boot.
+// Idempotent (ON CONFLICT category+title, qui encode le numéro de chunk).
 app.post("/api/knowledge/ingest", { preHandler: requireAssistantService }, async (req, reply) => {
-  const body = req.body as { category?: string; title?: string; body?: string; embedding?: number[] };
+  const body = req.body as {
+    category?: string; title?: string; body?: string; embedding?: number[]; embed_model?: string;
+  };
   const category = String(body.category ?? "").trim();
   const title = String(body.title ?? "").trim();
   const text = String(body.body ?? "");
@@ -969,11 +975,12 @@ app.post("/api/knowledge/ingest", { preHandler: requireAssistantService }, async
     .query(`ALTER TABLE knowledge ADD CONSTRAINT IF NOT EXISTS knowledge_category_title_key UNIQUE (category, title)`)
     .catch(() => {});
   await pool.query(
-    `INSERT INTO knowledge (category, title, body, embedding)
-     VALUES ($1, $2, $3, $4::vector)
+    `INSERT INTO knowledge (category, title, body, embedding, embed_model)
+     VALUES ($1, $2, $3, $4::vector, $5)
      ON CONFLICT (category, title) DO UPDATE
-       SET body = EXCLUDED.body, embedding = EXCLUDED.embedding, updated_at = now()`,
-    [category, title, text, `[${embedding.join(",")}]`],
+       SET body = EXCLUDED.body, embedding = EXCLUDED.embedding,
+           embed_model = EXCLUDED.embed_model, updated_at = now()`,
+    [category, title, text, `[${embedding.join(",")}]`, body.embed_model ?? null],
   );
   return { ok: true, category, title };
 });
@@ -2240,6 +2247,32 @@ async function ensureKnowledgeSearchIndex() {
   await pool.query(
     "CREATE INDEX IF NOT EXISTS knowledge_fts_idx ON knowledge USING gin (to_tsvector('french', title || ' ' || body))",
   );
+  await pool.query("ALTER TABLE knowledge ADD COLUMN IF NOT EXISTS embed_model TEXT");
+}
+
+/**
+ * Ré-embedde les chunks dont le vecteur vient d'un autre modèle que
+ * EMBED_MODEL : deux modèles ne produisent pas des vecteurs comparables, une
+ * base mélangée renverrait des résultats aléatoires. `body` est exactement le
+ * texte embeddé à l'ingestion (chunk Docling contextualisé), donc pas besoin de
+ * repasser par les PDF. Lancé sans bloquer le boot ; si Ollama est injoignable,
+ * on réessaiera au prochain démarrage.
+ */
+async function reembedStaleKnowledge() {
+  const { rows } = await pool.query(
+    "SELECT id, body FROM knowledge WHERE embed_model IS DISTINCT FROM $1",
+    [EMBED_MODEL],
+  );
+  if (rows.length === 0) return;
+  app.log.info(`[knowledge] ré-embedding de ${rows.length} chunk(s) avec ${EMBED_MODEL}`);
+  for (const r of rows) {
+    const vec = await embedDocument(r.body);
+    await pool.query(
+      "UPDATE knowledge SET embedding = $2::vector, embed_model = $3, updated_at = now() WHERE id = $1",
+      [r.id, `[${vec.join(",")}]`, EMBED_MODEL],
+    );
+  }
+  app.log.info(`[knowledge] ré-embedding terminé`);
 }
 
 /**
@@ -2276,6 +2309,9 @@ async function main() {
   await seedAssistantService();
   await ensureAssistantThreadsTable();
   await ensureKnowledgeSearchIndex();
+  reembedStaleKnowledge().catch((err) =>
+    app.log.warn(`[knowledge] ré-embedding KO, réessai au prochain boot: ${(err as Error).message}`),
+  );
   await seedDemoRoles();
   await refreshTagCache();
   setInterval(() => refreshTagCache().catch(() => {}), 10_000); // garde le cache frais

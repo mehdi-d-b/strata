@@ -11,6 +11,7 @@ exécutés par un ToolNode — graph.py les intercepte avant dispatch et renvoie
 une proposition à confirmer. Ne pas les appeler depuis ce module changerait
 cette garantie de sécurité.
 """
+import asyncio
 import json
 from typing import Annotated, Literal
 from urllib.parse import quote
@@ -19,6 +20,7 @@ from langchain_core.tools import tool
 from pydantic import Field
 
 import gateway
+from reranker import rerank
 
 # Tools d'écriture : jamais exécutés automatiquement (cf. graph.py). Même
 # invariant que WRITE_TOOLS dans assistant.ts.
@@ -30,6 +32,13 @@ WRITE_TOOLS = {"request_operation", "adjust_setpoint", "ack_alarm"}
 VESSELS = Literal["empateur", "ebullition", "fermenteur"]
 
 _MAX_ROWS = 30
+
+# search_knowledge : candidats demandés à la gateway, puis gardés après
+# reranking (cf. reranker.py). 10 et pas 20 : coût du reranker linéaire en
+# candidats (~4 s contre ~8 s dans Docker), et embeddinggemma place toujours le
+# bon chunk dans son top 3 sur l'éval du corpus.
+_RERANK_CANDIDATES = 10
+_KNOWLEDGE_RESULTS = 5
 
 
 def _trim(rows: list[dict], keep: tuple[str, ...], max_rows: int = _MAX_ROWS) -> list[dict]:
@@ -146,11 +155,19 @@ async def search_knowledge(
     défauts, historique d'incidents) par similarité sémantique. À utiliser quand
     l'opérateur cherche comment résoudre un problème, débloquer une machine,
     comprendre une cause racine."""
-    resp = await gateway.post("/api/knowledge/search", {"query": query})
+    resp = await gateway.post("/api/knowledge/search", {"query": query, "limit": _RERANK_CANDIDATES})
     if resp.status_code == 400:
         return json.dumps(resp.json())
     resp.raise_for_status()
-    return json.dumps(resp.json())
+    hits = resp.json()
+    if not isinstance(hits, list):  # {"message": "Aucun document trouvé…"}
+        return json.dumps(hits)
+    scores = await asyncio.to_thread(rerank, query, [h["body"] for h in hits])
+    if scores is not None:
+        for hit, score in zip(hits, scores):
+            hit["score"] = f"{score:.4f}"
+        hits.sort(key=lambda h: float(h["score"]), reverse=True)
+    return json.dumps(hits[:_KNOWLEDGE_RESULTS])
 
 
 @tool

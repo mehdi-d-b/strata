@@ -1,6 +1,7 @@
 .PHONY: up up-ai logs ps down clean
 
 ASSISTANT_MODEL ?= qwen2.5:7b
+EMBED_MODEL ?= embeddinggemma
 
 up:        ## Démarre le stack en arrière-plan (sans profils optionnels)
 	docker compose up -d
@@ -8,6 +9,7 @@ up:        ## Démarre le stack en arrière-plan (sans profils optionnels)
 up-ai:     ## Démarre le stack + assistant IA (Ollama) et télécharge le modèle
 	docker compose --profile ai up -d
 	docker compose exec ollama ollama pull $(ASSISTANT_MODEL)
+	docker compose exec ollama ollama pull $(EMBED_MODEL)
 
 down:      ## Arrête le stack (tous profils inclus : ai, plc4x, risingwave)
 	docker compose --profile ai --profile plc4x --profile risingwave down --remove-orphans

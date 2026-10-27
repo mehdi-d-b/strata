@@ -24,6 +24,9 @@ dependencies = [
   # direct après le premier correctif partiel (torch seul).
   "torch",
   "torchvision",
+  # Reranker cross-encoder (reranker.py). Déjà tiré par docling, déclaré
+  # parce qu'on l'importe désormais directement.
+  "transformers>=5.8",
   # Le serveur LangGraph (langgraph-cli[inmem]) sert désormais le chat en
   # continu (front assistant-ui, protocole /threads+/runs/stream) — plus un
   # outil de débogage ponctuel (étape 5), donc plus une dépendance dev-only.
