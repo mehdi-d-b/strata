@@ -5,9 +5,11 @@ import {
   MessagePrimitive,
   ThreadPrimitive,
   type ToolCallMessagePartProps,
+  useMessagePartText,
 } from "@assistant-ui/react";
 import { useLangGraphInterruptState, useLangGraphSendCommand } from "@assistant-ui/react-langgraph";
 import { Send } from "lucide-react";
+import Markdown, { type Components } from "react-markdown";
 import { ackAlarm, adjustSetpoint, executeOperation } from "@/api";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -88,11 +90,22 @@ function UserMessage() {
   );
 }
 
-/** Texte + indicateur de génération en cours (3 points animés, pas le curseur "●" statique par défaut). */
+/** Mise en forme des réponses du modèle (gras, listes…), sans dépendre d'un plugin de typographie. */
+const MARKDOWN_COMPONENTS: Components = {
+  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+  ul: ({ children }) => <ul className="mb-2 list-disc pl-5 last:mb-0">{children}</ul>,
+  ol: ({ children }) => <ol className="mb-2 list-decimal pl-5 last:mb-0">{children}</ol>,
+  li: ({ children }) => <li className="mb-0.5">{children}</li>,
+  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+  code: ({ children }) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">{children}</code>,
+};
+
+/** Texte en Markdown + indicateur de génération en cours (3 points animés, pas le curseur "●" statique par défaut). */
 function AssistantText() {
+  const { text } = useMessagePartText();
   return (
-    <p style={{ whiteSpace: "pre-line" }}>
-      <MessagePartPrimitive.Text />
+    <div>
+      <Markdown components={MARKDOWN_COMPONENTS}>{text}</Markdown>
       <MessagePartPrimitive.InProgress>
         <span className="ml-1 inline-flex items-center gap-0.5 align-middle">
           <span className="size-1 animate-bounce rounded-full bg-current [animation-delay:-0.3s]" />
@@ -100,7 +113,7 @@ function AssistantText() {
           <span className="size-1 animate-bounce rounded-full bg-current" />
         </span>
       </MessagePartPrimitive.InProgress>
-    </p>
+    </div>
   );
 }
 
@@ -225,7 +238,7 @@ export function AssistantView() {
               <div className="flex h-full flex-col items-center justify-center text-center text-sm text-muted-foreground">
                 Posez une question sur l'OEE, la production, les alarmes ou l'historique.
                 <br />
-                Les réponses respectent les droits d'accès du compte connecté.
+                Toute action sur l'usine attend votre confirmation.
               </div>
             </ThreadPrimitive.Empty>
             <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
