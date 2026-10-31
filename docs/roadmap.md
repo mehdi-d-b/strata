@@ -383,9 +383,8 @@ rétention sans toucher au SQL »).
 > Décision : garder la gateway TS **inchangée** (Kafka, WS, RBAC, alarmes, OEE) ; tout le
 > chat/RAG/agent bascule vers un microservice Python dédié, appelé en HTTP. Frontière de sécurité
 > préservée : `ai-service` n'a **aucun accès direct** à Postgres/Kafka — seule porte d'entrée =
-> la gateway, comme n'importe quel client HTTP. Justifié par une reprio explicite (employabilité/
-> portfolio > fondation évolutive > confort produit immédiat) plutôt que par un besoin produit —
-> assumé comme tel.
+> la gateway, comme n'importe quel client HTTP. Objectif : isoler l'IA dans un service dédié,
+> avec l'écosystème Python (LangGraph, Docling), sans toucher au cœur temps réel.
 - [x] **Étape 1 — squelette + preuve de frontière (2026-07-17)**. `ai-service/` (`uv`, FastAPI,
       LangGraph `create_react_agent`, `langchain-ollama`), un seul tool (`get_oee`, appelle
       `GET /api/oee` sur la gateway). Dockerfile + service `ai-service` dans `docker-compose.yml`
