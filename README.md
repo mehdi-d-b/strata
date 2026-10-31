@@ -155,7 +155,7 @@ Connectez-vous avec `admin` et le `ADMIN_PASSWORD` de votre `.env`. Le simulateu
 
 Je m'appelle Mehdi Bouzit, je suis ingénieur data et IA en freelance. J'adapte Strata aux PME industrielles : connexion à vos automates, indicateurs de votre métier, assistant formé sur vos procédures, déploiement sur votre site.
 
-**Contact :** [À COMPLÉTER : e-mail, LinkedIn, Malt]
+**Contact :** [LinkedIn](https://www.linkedin.com/in/mehdi-bouzit-962401125/)
 
 ## Licence
 
