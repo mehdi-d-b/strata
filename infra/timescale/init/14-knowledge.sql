@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS knowledge (
     embedding   vector(768),            -- embeddinggemma produit 768 dims
     embed_model TEXT,                   -- modèle ayant produit `embedding` (ré-embedding si ≠ EMBED_MODEL)
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT knowledge_category_title_key UNIQUE (category, title)
 );
 
 -- Index HNSW : recherche ANN rapide (meilleure perf que IVFFlat sur petits corpus).
@@ -24,9 +25,6 @@ CREATE INDEX IF NOT EXISTS knowledge_embedding_idx
 -- recherche lexicale que par seul embedding. Cet index complète HNSW.
 CREATE INDEX IF NOT EXISTS knowledge_fts_idx
     ON knowledge USING gin (to_tsvector('french', title || ' ' || body));
-
-ALTER TABLE knowledge
-    ADD CONSTRAINT IF NOT EXISTS knowledge_category_title_key UNIQUE (category, title);
 
 -- Accès lecture seule pour le rôle assistant.
 GRANT SELECT ON knowledge TO strata_ro;

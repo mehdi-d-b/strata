@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ai-service:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Tests de contrat des outils du LLM
+        working-directory: ai-service
+        run: uv run --python 3.12 python -m unittest discover tests
+
+  gateway:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - working-directory: gateway
+        run: |
+          npm ci
+          npx tsc --noEmit -p .
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+  # Une base neuve doit s'initialiser : les scripts SQL ne tournent qu'à la
+  # création du volume, un poste de dev existant ne voit donc jamais leurs erreurs.
+  base-neuve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialise TimescaleDB depuis zéro
+        run: |
+          cp .env.example .env
+          docker compose up -d timescaledb
+          for i in $(seq 1 60); do
+            docker compose exec -T timescaledb psql -U strata -d strata -tAc "SELECT count(*) FROM planned_stop" && exit 0
+            [ "$(docker inspect -f '{{.State.Running}}' strata-timescaledb)" = "true" ] || break
+            sleep 2
+          done
+          docker compose logs timescaledb
+          exit 1

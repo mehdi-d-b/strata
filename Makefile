@@ -10,6 +10,7 @@ up-ai:     ## Démarre le stack + assistant IA (Ollama) et télécharge le modè
 	docker compose --profile ai up -d
 	docker compose exec ollama ollama pull $(AI_SERVICE_MODEL)
 	docker compose exec ollama ollama pull $(EMBED_MODEL)
+	docker compose exec ai-service uv run python ingest.py
 
 down:      ## Arrête le stack (tous profils inclus : ai, plc4x, risingwave)
 	docker compose --profile ai --profile plc4x --profile risingwave down --remove-orphans

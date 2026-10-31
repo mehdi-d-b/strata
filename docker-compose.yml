@@ -281,7 +281,7 @@ services:
       # Le défaut ne sert qu'au démarrage local ; .env.example fournit une valeur
       # dédiée. En production, AI_SERVICE_PASSWORD doit être un secret distinct.
       AI_SERVICE_PASSWORD: ${AI_SERVICE_PASSWORD:-change-me-en-prod-assistant}
-      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
       # qwen3.5:9b (GGUF Q4_K_M) choisi le 2026-10-27 sur l'éval
       # ai-service/evals/tool_selection.py (21 questions × 5 essais, prompt de
       # prod) : pass^5 0.905 contre 0.857 pour qwen2.5:7b (qui sautait la SOP

@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS oee_line (
     label       TEXT,
     ideal_rate  DOUBLE PRECISION NOT NULL, -- cadence nominale, pièces/min à pleine vitesse
     running_tag TEXT,                      -- tag d'état (canonique : 1 = en marche)
+    waiting_tag TEXT,                      -- tag d'attente amont (1 = en attente, cf. 10-oee-reasons.sql)
     enabled     BOOLEAN NOT NULL DEFAULT TRUE,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
